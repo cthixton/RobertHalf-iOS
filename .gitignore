@@ -1,7 +1,7 @@
 build/
 *~
-xcuserdata
+## xcuserdata
 *.xccheckout
 .DS_Store
-Pods/
+## Pods/
 .idea
