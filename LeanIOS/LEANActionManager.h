@@ -9,6 +9,8 @@
 #import <Foundation/Foundation.h>
 #import "LEANWebViewController.h"
 
+@class MCKMPTopNavComponent;
+
 @interface LEANActionButtons : NSObject
 @property NSArray *rightItems;
 @property NSArray *leftItems;
@@ -19,6 +21,7 @@
 
 - (instancetype)initWithWebviewController:(LEANWebViewController*)wvc;
 - (void)didLoadUrl:(NSURL*)url;
+- (void)loadNav2TopNav:(MCKMPTopNavComponent*)topNav;
 - (void)traitCollectionDidChange:(UITraitCollection *)previousTraitCollection;
 - (UIBarButtonItem *)createNavBarButtonWithLabel:(NSString *)label icon:(NSString *)icon target:(id)target action:(SEL)action;
 - (LEANActionButtons *)configureNavBarButtonsAllowingLeftAction:(BOOL)allowLeftAction;

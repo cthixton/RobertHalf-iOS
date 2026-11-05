@@ -8,25 +8,21 @@
 
 #import "LEANLoadingSpinnerManager.h"
 #import "LEANAppDelegate.h"
-@import GoNativeCore;
+@import MedianCoreKMP;
 
 @interface LEANLoadingSpinnerManager()
-@property id<GNController> controller;
 @end
 
 @implementation LEANLoadingSpinnerManager
 
 - (instancetype)initWithVc:(UIViewController *)vc {
-    self = [super init];
-    if (self) {
-        self.controller = [((LEANAppDelegate *)[UIApplication sharedApplication].delegate).bridge getControllerForKey:@"loadingSpinner" runner:(id)vc];
-    }
-    return self;
+    return [super init];
 }
 
 - (void)startAnimationWithWvc:(LEANWebViewController *)wvc {
-    if (self.controller) {
-        [self.controller triggerEvent:@"showLoadingSpinner"];
+    if ([MCKMPEventBus.shared hasSubscribersEvent:@"showLoadingSpinner"]) {
+        // the animated spinner attaches to the controller's view
+        [MCKMPEventBus.shared emitEvent:@"showLoadingSpinner" payload:@{@"view": wvc.view}];
         return;
     }
     
@@ -47,8 +43,8 @@
 }
 
 - (void)stopAnimation {
-    if (self.controller) {
-        [self.controller triggerEvent:@"hideLoadingSpinner"];
+    if ([MCKMPEventBus.shared hasSubscribersEvent:@"hideLoadingSpinner"]) {
+        [MCKMPEventBus.shared emitEvent:@"hideLoadingSpinner"];
         return;
     }
     

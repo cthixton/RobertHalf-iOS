@@ -10,6 +10,7 @@
 #import "LEANMenuViewController.h"
 #import "LEANWebViewController.h"
 #import "LEANUtilities.h"
+@import MedianCoreKMP;
 
 @interface LEANRootViewController ()
 
@@ -29,9 +30,9 @@
 {
     [super awakeFromNib];
     
-    GoNativeAppConfig *appConfig = [GoNativeAppConfig sharedAppConfig];
-    
-    if ([appConfig.iosTheme isEqualToString:@"dark"]) {
+    MCKMPStylingConfig *styling = MCKMPMutableConfig.shared.instance.configRoot.styling;
+
+    if ([styling.iosTheme isEqualToString:@"dark"]) {
         self.liveBlurBackgroundStyle = REFrostedViewControllerLiveBackgroundStyleDark;
         self.blurTintColor = [UIColor colorWithWhite:0 alpha:0.75f];
     } else {
@@ -43,7 +44,7 @@
         self.direction = REFrostedViewControllerDirectionRight;
     }
 
-    self.animationDuration = [appConfig.menuAnimationDuration floatValue];
+    self.animationDuration = styling.menuAnimationDuration ? styling.menuAnimationDuration.floatValue : 0.2;
     self.limitMenuViewSize = YES;
     self.menuViewSize = CGSizeMake(270, NAN);
     
@@ -60,8 +61,7 @@
 
 -(void)viewDidLoad
 {
-    GoNativeAppConfig *appConfig = [GoNativeAppConfig sharedAppConfig];
-    if ([appConfig.iosTheme isEqualToString:@"dark"]) {
+    if ([MCKMPMutableConfig.shared.instance.configRoot.styling.iosTheme isEqualToString:@"dark"]) {
         self.view.backgroundColor = [UIColor blackColor];
     }
     [super viewDidLoad];
@@ -120,6 +120,16 @@
     }
 }
 
+- (void)handleDeeplinkUrl:(NSURL *)url {
+    UINavigationController *nav = (UINavigationController*)self.contentViewController;
+    for (UIViewController *vc in nav.viewControllers) {
+        if ([vc isKindOfClass:[LEANWebViewController class]]) {
+            [(LEANWebViewController*)vc handleDeeplinkUrl:url];
+            break;
+        }
+    }
+}
+
 - (BOOL)webviewOnTop
 {
     return [((UINavigationController*)self.contentViewController).topViewController isKindOfClass:[LEANWebViewController class]];
@@ -138,7 +148,7 @@
 
 - (BOOL) prefersHomeIndicatorAutoHidden
 {
-    return [GoNativeAppConfig sharedAppConfig].iosAutoHideHomeIndicator;
+    return MCKMPMutableConfig.shared.instance.configRoot.styling.iosAutoHideHomeIndicator;
 }
 
 @end

@@ -1,5 +1,5 @@
 /* Button: Cancel */
-"button-cancel" = ":キャンセル";
+"button-cancel" = "キャンセル";
 
 /* Button: OK */
 "button-ok" = "OK";
@@ -18,3 +18,12 @@
 
 /* Button: Share External */
 "button-share-link" = "共有";
+
+/* Button: Done */
+"button-done" = "完了";
+
+/* Button: Back */
+"button-back" = "戻る";
+
+/* Button: Forward */
+"button-forward" = "進む";

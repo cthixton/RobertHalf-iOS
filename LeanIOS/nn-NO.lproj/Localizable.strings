@@ -9,3 +9,21 @@
 
 /* iOS Button: Menu */
 "button-menu" = "Meny";
+
+/* Button: Done */
+"button-done" = "Ferdig";
+
+/* Button: Copy Link */
+"button-copy-link" = "Kopier lenkjeadresse";
+
+/* Button: Open External */
+"button-open-external" = "Opne lenkje i ekstern nettlesar";
+
+/* Button: Share External */
+"button-share-link" = "Del lenkje";
+
+/* Button: Back */
+"button-back" = "Tilbake";
+
+/* Button: Forward */
+"button-forward" = "Fram";

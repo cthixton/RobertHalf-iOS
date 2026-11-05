@@ -9,10 +9,10 @@
 #import "LEANRegexRulesManager.h"
 #import "LEANWindowsManager.h"
 #import "GonativeIO-Swift.h"
+@import MedianCoreKMP;
 
 @interface LEANRegexRulesManager()
 @property LEANWindowsManager *windowsManager;
-@property NSArray<NSDictionary *> *regexRules;
 @end
 
 @implementation LEANRegexRulesManager
@@ -22,53 +22,45 @@
     self = [super init];
     if (self) {
         self.windowsManager = [[LEANWindowsManager alloc] initWithWvc:wvc];
-        [self initializeValues];
     }
     return self;
 }
 
-- (void)initializeValues {
-    NSArray<NSDictionary *> *regexRules;
-    [[GoNativeAppConfig sharedAppConfig] initializeRegexRules:&regexRules];
-    self.regexRules = regexRules;
-}
-
 - (void)handleUrl:(NSURL *)url query:(NSDictionary*)query {
     if ([@"/set" isEqualToString:url.path]) {
-        [self setRules:query[@"rules"]];
+        NSArray *rules = query[@"rules"];
+        if ([rules isKindOfClass:[NSArray class]]) {
+            NSData *data = [NSJSONSerialization dataWithJSONObject:rules options:0 error:nil];
+            NSString *json = [[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding];
+            if (json) [MCKMPMutableConfig.shared.instance setRegexRulesFromJsonRulesJson:json];
+        }
     }
 }
 
-- (void)setRules:(NSArray *)rules {
-    NSArray *regexRules;
-    [[GoNativeAppConfig sharedAppConfig] setNewRegexRules:rules regexRulesArray:&regexRules];
-    self.regexRules = regexRules;
-}
-
+// First matching regexInternalExternal rule decides; same-host/subdomain fallback when none match.
 - (BOOL)shouldHandleRequest:(NSURLRequest *)request {
     NSURL *url = [request URL];
     NSString *urlString = [url absoluteString];
-    NSString* hostname = [url host];
-    
-    NSDictionary *matchResult = [[GoNativeAppConfig sharedAppConfig] getRegexRuleForURL:urlString rules:self.regexRules];
-    
-    BOOL matchedRegex = [matchResult[@"matches"] boolValue];
-    if (matchedRegex) {
-        NSString *mode = matchResult[@"mode"];
-        
-        if ([mode isKindOfClass:[NSString class]] && ![mode isEqualToString:@"internal"]) {
+
+    MCKMPMutableConfigState *config = MCKMPMutableConfig.shared.instance;
+
+    // median-core resolves this against route rules once the app config has been
+    // migrated, and against the V1 regexes until then. nil means no rule matched.
+    NSString *mode = [config linkModeForUrlUrl:urlString];
+    if (mode) {
+        if (![mode isEqualToString:@"internal"]) {
             [self.windowsManager openUrl:request.URL mode:mode];
             return NO;
         }
-    } else  {
-        NSString *initialHost = [GoNativeAppConfig sharedAppConfig].initialHost;
-        
-        if (![hostname isEqualToString:initialHost] && ![hostname hasSuffix:[@"." stringByAppendingString:initialHost]]) {
-            [self.windowsManager openUrl:request.URL mode:@"external"];
-            return NO;
-        }
+        return YES;
     }
-    
+
+    // no rule matched: stay in-app for the initial host and its subdomains
+    if (![config.configRoot.general isInternalHostUrl:urlString ?: @""]) {
+        [self.windowsManager openUrl:request.URL mode:@"external"];
+        return NO;
+    }
+
     return YES;
 }
 

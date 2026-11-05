@@ -10,29 +10,26 @@
 #import "LEANNavigationController.h"
 #import "LEANWebViewController.h"
 #import "LEANRootViewController.h"
-#import "LEANLoginManager.h"
 #import "LEANUrlInspector.h"
 #import "LEANTabManager.h"
-#import "LEANProfilePicker.h"
 #import "LEANUtilities.h"
+#import "LEANNotifications.h"
 #import "GonativeIO-Swift.h"
 @import MedianIcons;
+@import MedianCoreKMP;
 
 @interface LEANMenuViewController ()
 
-@property id menuItems;
+@property NSArray<MCKMPMenuItem *> *menuItems;
+@property NSArray<MCKMPMenuItem *> *nav2Items; // nav2: overrides config sidebarMenus when set
 @property NSMutableArray *groupExpanded;
 
 @property LEANWebViewController *wvc;
-@property LEANProfilePicker *profilePicker;
 
 @property UIImage *collapsedIndicator;
 @property UIImage *expandedIndicator;
-@property UIButton *settingsButton;
 
 @property UIView *headerView;
-@property UISegmentedControl *segmentedControl;
-@property NSArray *segmentedControlItems;
 
 @property BOOL groupsHaveIcons;
 @property BOOL childrenHaveIcons;
@@ -61,37 +58,21 @@
     headerView.autoresizingMask = UIViewAutoresizingNone;
     UIButton *headerButton = (UIButton*)[headerView viewWithTag:1];
     [headerButton addTarget:self action:@selector(picturePressed:) forControlEvents:UIControlEventTouchUpInside];
-    if ([GoNativeAppConfig sharedAppConfig].sidebarIcon) {
-        [headerButton setImage:[GoNativeAppConfig sharedAppConfig].sidebarIcon forState:UIControlStateNormal];
-    }
-    else if ([GoNativeAppConfig sharedAppConfig].appIcon) {
-        [headerButton setImage:[GoNativeAppConfig sharedAppConfig].appIcon forState:UIControlStateNormal];
-    }
-        
-    self.segmentedControl = (UISegmentedControl*)[headerView viewWithTag:3];
-    [self setupSegmentedControl];
-    
+
+    // segmented control dropped (legacy); hide the nib view
+    [headerView viewWithTag:3].hidden = YES;
+
     self.tableView.tableHeaderView = headerView;
     self.tableView.tableFooterView = [[UIView alloc] initWithFrame:CGRectMake(0, 0, 0, 0)];
     
     // actually update the menus
     [self updateMenuWithStatus:@"default"];
 
-    if ([GoNativeAppConfig sharedAppConfig].loginDetectionURL) {
-        // subscribe to login notifications
-        [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(didReceiveLoginNotification:) name:kLEANLoginManagerNotificationName object:nil];
-        [[LEANLoginManager sharedManager] checkIfNotAlreadyChecking];
-    }
-
     // pre-load images. Color them too.
     self.collapsedIndicator = [[UIImage imageNamed:@"chevronDown"] imageWithRenderingMode:UIImageRenderingModeAlwaysTemplate];
     self.expandedIndicator = [[UIImage imageNamed:@"chevronUp"] imageWithRenderingMode:UIImageRenderingModeAlwaysTemplate];
     
     [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(didReceiveNotification:) name:kLEANAppConfigNotificationProcessedMenu object:nil];
-    [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(didReceiveNotification:) name:kLEANAppConfigNotificationProcessedSegmented object:nil];
-
-    // profile picker
-    self.profilePicker = [[LEANProfilePicker alloc] init];
 }
 
 -(void)dealloc
@@ -105,9 +86,6 @@
     if ([[notification name] isEqualToString:kLEANAppConfigNotificationProcessedMenu]) {
         [self updateMenuWithStatus:self.lastUpdatedStatus];
     }
-    else if ([[notification name] isEqualToString:kLEANAppConfigNotificationProcessedSegmented]) {
-        [self updateSegmentedControl];
-    }
 }
 
 - (void)viewDidAppear:(BOOL)animated
@@ -119,31 +97,33 @@
     self.wvc = (LEANWebViewController*)nav.viewControllers[0];
 }
 
-- (void)didReceiveLoginNotification:(NSNotification*)notification
+// nav2: items from the resolved instance; the existing table machinery renders them
+- (void)setNav2MenuItems:(NSArray<MCKMPMenuItem *> *)items
 {
-    LEANLoginManager *loginManager = [notification object];
-    [self updateMenuWithStatus:loginManager.loginStatus];
+    if ([self.nav2Items isEqualToArray:items]) return;
+    self.nav2Items = items;
+    [self updateMenuWithStatus:self.lastUpdatedStatus];
 }
 
 - (void)updateMenuWithStatus:(NSString *)status
 {
     if (!status) status = @"default";
-    
+
     self.lastUpdatedStatus = status;
-    
-    self.menuItems = [GoNativeAppConfig sharedAppConfig].menus[status];
-    
+
+    self.menuItems = self.nav2Items ?: MCKMPMutableConfig.shared.instance.sidebarMenus;
+
     // see if any menu items have icons. Used for layout indentation.
     self.groupsHaveIcons = NO;
     self.childrenHaveIcons = NO;
-    for (id item in self.menuItems) {
-        if (item[@"icon"] && item[@"icon"] != [NSNull null]) {
+    for (MCKMPMenuItem *item in self.menuItems) {
+        if (item.icon.length > 0) {
             self.groupsHaveIcons = YES;
         }
-        
-        if ([item[@"isGrouping"] boolValue]) {
-            for (id sublink in item[@"subLinks"]) {
-                if (sublink[@"icon"] && sublink[@"icon"] != [NSNull null]) {
+
+        if (item.isGrouping) {
+            for (MCKMPMenuItem *sublink in item.subLinks) {
+                if (sublink.icon.length > 0) {
                     self.childrenHaveIcons = YES;
                     break;
                 }
@@ -166,23 +146,9 @@
     [self updateMenuWithStatus:@"default"];
 }
 
-- (void)showSettings:(BOOL)showSettings
-{
-    [self.settingsButton setUserInteractionEnabled:showSettings];
-    [UIView animateWithDuration:0.3 animations:^(void){
-        self.settingsButton.alpha = showSettings ? 1.0 : 0.0;
-    }];
-}
-
 - (IBAction)picturePressed:(id)sender {
-    [self.wvc loadUrl:[GoNativeAppConfig sharedAppConfig].initialURL];
+    [self.wvc loadUrl:[NSURL URLWithString:MCKMPMutableConfig.shared.instance.initialUrl]];
     [self.frostedViewController hideMenuViewController];
-}
-
-- (void)parseProfilePickerJSON:(NSString *)json
-{
-    [self.profilePicker parseJson:json];
-    [self showSettings:self.profilePicker.hasProfiles];
 }
 
 #pragma mark - Table view data source
@@ -195,7 +161,7 @@
 - (NSInteger)tableView:(UITableView *)tableView numberOfRowsInSection:(NSInteger)section
 {
     if ([self.groupExpanded[section] boolValue]) {
-        return 1 + [self.menuItems[section][@"subLinks"] count];
+        return 1 + self.menuItems[section].subLinks.count;
     }
     else
         return 1;
@@ -229,21 +195,23 @@
     imageView = (UIImageView*)[cell.contentView viewWithTag:2];
     
     // get data
-    id menuItem;
+    MCKMPMenuItem *menuItem;
     if (indexPath.row == 0) {
         menuItem = self.menuItems[indexPath.section];
     } else {
-        menuItem = self.menuItems[indexPath.section][@"subLinks"][indexPath.row - 1];
+        menuItem = self.menuItems[indexPath.section].subLinks[indexPath.row - 1];
     }
-    
+
     // text
-    label.text = [menuItem[@"label"] stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
-    if ([GoNativeAppConfig sharedAppConfig].iosSidebarFont) {
-        label.font = [GoNativeAppConfig sharedAppConfig].iosSidebarFont;
+    label.text = [menuItem.label stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+    NSString *sidebarFont = MCKMPMutableConfig.shared.instance.navDefaultStyles.sidebarNavigationBar.styling.ios.sidebarFont;
+    if (sidebarFont.length > 0) {
+        UIFont *font = [UIFont fontWithName:sidebarFont size:label.font.pointSize];
+        if (font) label.font = font;
     }
-    
+
     // expand/collapse indicator
-    if ([menuItem[@"isGrouping"] boolValue]) {
+    if (menuItem.isGrouping) {
         if ([self.groupExpanded[indexPath.section] boolValue]) {
             cell.accessoryView = [[UIImageView alloc] initWithImage:self.expandedIndicator];
         } else {
@@ -254,8 +222,8 @@
     
     // icon
     UILabel *icon;
-    NSString *iconName = menuItem[@"icon"];
-    if (iconName && [iconName isKindOfClass:[NSString class]]) {
+    NSString *iconName = menuItem.icon;
+    if (iconName.length > 0) {
         if ([iconName hasPrefix:@"gonative-"]) {
             UIImage *image = [UIImage imageNamed:iconName];
             imageView.image = image;
@@ -300,19 +268,19 @@
     
     // if is first row, then check if it is grouped.
     if (indexPath.row == 0) {
-        if ([self.menuItems[indexPath.section][@"isGrouping"] boolValue]) {
+        if (self.menuItems[indexPath.section].isGrouping) {
             self.groupExpanded[indexPath.section] = [NSNumber numberWithBool:![self.groupExpanded[indexPath.section] boolValue]];
             [self.tableView reloadSections:[NSIndexSet indexSetWithIndex:indexPath.section] withRowAnimation:UITableViewRowAnimationAutomatic];
         } else {
-            NSDictionary *item = self.menuItems[indexPath.section];
-            url = item[@"url"];
-            isLogout = [item[@"isLogout"] boolValue];
+            MCKMPMenuItem *item = self.menuItems[indexPath.section];
+            url = item.url;
+            isLogout = item.isLogout;
         }
     } else {
         // regular child
-        NSDictionary *item = self.menuItems[indexPath.section][@"subLinks"][indexPath.row - 1];
-        url = item[@"url"];
-        isLogout = [item[@"isLogout"] boolValue];
+        MCKMPMenuItem *item = self.menuItems[indexPath.section].subLinks[indexPath.row - 1];
+        url = item.url;
+        isLogout = item.isLogout;
     }
     
     if (url == nil) {
@@ -323,7 +291,7 @@
     url = [url stringByReplacingOccurrencesOfString:@"GONATIVE_USERID" withString:[LEANUrlInspector sharedInspector].userId];
     [self.wvc handleJsNavigationUrl:url];
     
-    if (![url hasPrefix:@"javascript:"] && [GoNativeAppConfig sharedAppConfig].injectMedianJS) {
+    if (![url hasPrefix:@"javascript:"] && MCKMPMutableConfig.shared.instance.configRoot.general.injectMedianJS) {
         [self.wvc.tabManager selectTabWithUrl:url];
         
         if (UIDevice.currentDevice.userInterfaceIdiom == UIUserInterfaceIdiomPad) {
@@ -340,91 +308,6 @@
     }
 }
 
-#pragma mark - Segmented control
--(void)setupSegmentedControl
-{
-    [self.segmentedControl addTarget:self action:@selector(segmentedControlChanged:) forControlEvents:UIControlEventValueChanged];
-    [self updateSegmentedControl];
-    
-}
-
--(void)updateSegmentedControl
-{
-    self.segmentedControlItems = [GoNativeAppConfig sharedAppConfig].segmentedControlItems;
-    BOOL showSegmentedControl = self.segmentedControlItems && [self.segmentedControlItems count] > 0;
-    if (showSegmentedControl) {
-        if (self.segmentedControl.hidden) {
-            // expand header view
-            self.segmentedControl.hidden = NO;
-            CGRect oldFrame = self.headerView.frame;
-            oldFrame.size.height += 50;
-            self.headerView.frame = oldFrame;
-            [self.tableView setTableHeaderView:self.headerView];
-        }
-        
-        [self.segmentedControl removeAllSegments];
-        for (NSInteger i = 0; i < [self.segmentedControlItems count]; i++) {
-            NSDictionary *item = self.segmentedControlItems[i];
-            
-            NSString *label = nil;
-            BOOL selected = NO;
-            
-            if ([item isKindOfClass:[NSDictionary class]]) {
-                label = item[@"label"];
-                selected = [item[@"selected"] boolValue];
-            }
-            
-            if (![label isKindOfClass:[NSString class]]) {
-                label = @"Invalid";
-            }
-            
-            [self.segmentedControl insertSegmentWithTitle:label atIndex:i animated:NO];
-            if (selected) {
-                self.segmentedControl.selectedSegmentIndex = i;
-            }
-        }
-        
-    }
-    else {
-        if (!self.segmentedControl.hidden) {
-            self.segmentedControl.hidden = YES;
-            
-            // shrink the header view
-            CGRect oldFrame = self.headerView.frame;
-            oldFrame.size.height -= 50;
-            self.headerView.frame = oldFrame;
-            [self.tableView setTableHeaderView:self.headerView];
-        }
-    }
-}
-
--(IBAction)segmentedControlChanged:(id)sender
-{
-    UISegmentedControl *control = sender;
-    NSInteger selectedIndex = control.selectedSegmentIndex;
-    if (selectedIndex < 0 || selectedIndex >= [self.segmentedControlItems count]) return;
-    
-    NSDictionary *item = self.segmentedControlItems[selectedIndex];
-    if (![item isKindOfClass:[NSDictionary class]]) return;
-
-    NSString *url = item[@"url"];
-    NSString *javascript = item[@"javascript"];
-    
-    if ([url isKindOfClass:[NSString class]]) {
-        if ([url hasPrefix:@"javascript:"]) {
-            NSString *js = [url substringFromIndex: [@"javascript:" length]];
-            [self.wvc runJavascript:js];
-        } else {
-            if ([javascript isKindOfClass:[NSString class]] && [javascript length] > 0) {
-                [self.wvc loadUrl:[NSURL URLWithString:url] andJavascript:javascript];
-            } else {
-                [self.wvc loadUrlAfterFilter:[NSURL URLWithString:url]];
-            }
-        }
-    }
-    
-    [self.frostedViewController hideMenuViewController];
-}
 @end
 
 

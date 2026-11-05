@@ -8,9 +8,10 @@
 
 #import <UIKit/UIKit.h>
 #import "REFrostedViewController.h"
-#import "LEANLoginManager.h"
+
+@class MCKMPMenuItem;
 
 @interface LEANMenuViewController : UITableViewController
 - (void)updateMenuWithStatus:(NSString*)status;
-- (void)parseProfilePickerJSON:(NSString*)json;
+- (void)setNav2MenuItems:(NSArray<MCKMPMenuItem*>*)items;
 @end

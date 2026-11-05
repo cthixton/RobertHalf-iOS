@@ -9,7 +9,6 @@
 #import <UIKit/UIKit.h>
 #import <WebKit/WebKit.h>
 #import "REFrostedViewController.h"
-#import "LEANProfilePicker.h"
 @class LEANTabManager;
 
 static NSString *kLEANWebViewControllerUserStartedLoading = @"co.median.ios.WebViewController.started";
@@ -46,6 +45,7 @@ static NSString *kLEANWebViewControllerClearPools = @"co.median.ios.WebViewContr
 - (void) refreshPage;
 - (void) searchPressed:(id)sender;
 - (void) setSharePopOverRect:(CGRect)rect;
+- (void) handleDeeplinkUrl:(NSURL *)url;
 - (void) handleJSBridgeFunctions:(id)data;
 - (void) handleJsNavigationUrl:(NSString *)url;
 - (BOOL) handleNewWindowRequest:(NSURLRequest *)request initialWebview:(WKWebView *)initialWebview;

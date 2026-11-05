@@ -50,6 +50,7 @@
       "menus": [
         {
           "active": false,
+          "name": "default",
           "items": [
             {
               "url": "https://roberthalf.com/us/en/jobs",
@@ -631,72 +632,71 @@
               "label": "United states - english",
               "subLinks": []
             }
-          ],
-          "name": "default"
+          ]
         }
       ]
     },
     "regexInternalExternal": {
       "rules": [
         {
+          "regex": "^(?!https?://).*",
           "mode": "external",
           "label": "Non-web links",
-          "pagesToTrigger": "custom",
-          "regex": "^(?!https?://).*"
+          "pagesToTrigger": "custom"
         },
         {
+          "regex": "https?://([-\\w]+\\.)*facebook\\.com.*",
           "mode": "appbrowser",
           "label": "Facebook",
-          "pagesToTrigger": "custom",
-          "regex": "https?://([-\\w]+\\.)*facebook\\.com.*"
+          "pagesToTrigger": "custom"
         },
         {
+          "regex": "https?://([\\-\\w]+\\.)*(twitter|x)\\.com/.*",
           "mode": "appbrowser",
           "label": "Twitter/X",
-          "pagesToTrigger": "custom",
-          "regex": "https?://([\\-\\w]+\\.)*(twitter|x)\\.com/.*"
+          "pagesToTrigger": "custom"
         },
         {
+          "regex": "https?://([-\\w]+\\.)*instagram\\.com/.*",
           "mode": "appbrowser",
           "label": "Instagram",
-          "pagesToTrigger": "custom",
-          "regex": "https?://([-\\w]+\\.)*instagram\\.com/.*"
+          "pagesToTrigger": "custom"
         },
         {
+          "regex": "https?://maps\\.google\\.com.*",
           "mode": "appbrowser",
           "label": "Google Maps",
-          "pagesToTrigger": "custom",
-          "regex": "https?://maps\\.google\\.com.*"
+          "pagesToTrigger": "custom"
         },
         {
+          "regex": "https?://([-\\w]+\\.)*google\\.com/maps/search/.*",
           "mode": "appbrowser",
           "label": "Google Maps Search",
-          "pagesToTrigger": "custom",
-          "regex": "https?://([-\\w]+\\.)*google\\.com/maps/search/.*"
+          "pagesToTrigger": "custom"
         },
         {
+          "regex": "https?://([-\\w]+\\.)*linkedin\\.com/.*",
           "mode": "appbrowser",
           "label": "LinkedIn",
-          "pagesToTrigger": "custom",
-          "regex": "https?://([-\\w]+\\.)*linkedin\\.com/.*"
+          "pagesToTrigger": "custom"
         },
         {
+          "regex": "https?://login\\.microsoftonline\\.com.*",
           "mode": "internal",
           "label": "Microsoft Login",
-          "pagesToTrigger": "custom",
-          "regex": "https?://login\\.microsoftonline\\.com.*"
+          "pagesToTrigger": "custom"
         },
         {
+          "regex": "https?:\\/\\/([-\\w]+\\.)*roberthalf.com(\\/.*)?$",
           "mode": "internal",
           "label": "All pages on my domain",
-          "pagesToTrigger": "domain",
-          "regex": "https?:\\/\\/([-\\w]+\\.)*roberthalf.com(\\/.*)?$"
+          "pagesToTrigger": "domain"
         },
         {
+          "regex": ".*",
           "mode": "appbrowser",
           "label": "All Other Links",
-          "pagesToTrigger": "all",
-          "regex": ".*"
+          "pagesToTrigger": "all"
         }
       ],
       "active": true
@@ -704,8 +704,8 @@
     "androidPullToRefresh": false,
     "iosPullToRefresh": true,
     "navigationTitles": {
-      "titles": [],
-      "active": true
+      "active": true,
+      "titles": []
     },
     "ignorePageFinishedRegexes": [],
     "actionConfig": {
@@ -720,8 +720,8 @@
       "enableAndroidApplinks": false
     },
     "navigationLevels": {
-      "levels": [],
-      "active": true
+      "active": true,
+      "levels": []
     },
     "toolbarNavigation": {
       "enabled": false,
@@ -781,7 +781,795 @@
       "enabled": false,
       "numWindows": 5,
       "autoClose": false
-    }
+    },
+    "migrationWarnings": [
+      "Sidebar: login-aware menu selection (menuSelectionConfig) is not supported by Native Navigation V2 and was not migrated — use the median.sidebar JavaScript Bridge API to switch menus at runtime."
+    ],
+    "linkBehavior": {
+      "active": true,
+      "rules": [
+        {
+          "routes": "*:",
+          "mode": "external",
+          "label": "Non-web links",
+          "pagesToTrigger": "custom"
+        },
+        {
+          "routes": "**.facebook.com/**",
+          "mode": "appbrowser",
+          "label": "Facebook",
+          "pagesToTrigger": "custom"
+        },
+        {
+          "routes": "**.twitter.com/**",
+          "mode": "appbrowser",
+          "label": "Twitter/X",
+          "pagesToTrigger": "custom"
+        },
+        {
+          "routes": "**.x.com/**",
+          "mode": "appbrowser",
+          "label": "Twitter/X",
+          "pagesToTrigger": "custom"
+        },
+        {
+          "routes": "**.instagram.com/**",
+          "mode": "appbrowser",
+          "label": "Instagram",
+          "pagesToTrigger": "custom"
+        },
+        {
+          "routes": "maps.google.com/**",
+          "mode": "appbrowser",
+          "label": "Google Maps",
+          "pagesToTrigger": "custom"
+        },
+        {
+          "routes": "**.google.com/maps/search/**",
+          "mode": "appbrowser",
+          "label": "Google Maps Search",
+          "pagesToTrigger": "custom"
+        },
+        {
+          "routes": "**.linkedin.com/**",
+          "mode": "appbrowser",
+          "label": "LinkedIn",
+          "pagesToTrigger": "custom"
+        },
+        {
+          "routes": "login.microsoftonline.com/**",
+          "mode": "internal",
+          "label": "Microsoft Login",
+          "pagesToTrigger": "custom"
+        },
+        {
+          "routes": "**.roberthalf.com/**",
+          "mode": "internal",
+          "label": "All pages on my domain",
+          "pagesToTrigger": "domain"
+        },
+        {
+          "routes": "**",
+          "mode": "appbrowser",
+          "label": "All Other Links",
+          "pagesToTrigger": "all"
+        }
+      ]
+    },
+    "linkBehaviorMigrationWarnings": [],
+    "defaultStyles": {
+      "topNavigationBar": {
+        "styling": {
+          "ios": {
+            "defaultDisplay": "text",
+            "imageType": "appIcon",
+            "newImage": "assets/defaults/app-icon-placeholder.png",
+            "newImageDark": "assets/defaults/app-icon-placeholder.png",
+            "textColor": "#0E0D08",
+            "textColorDark": "#ffffff",
+            "tintColor": "#f8f8f8",
+            "tintColorDark": "#202020",
+            "hideOnScroll": false
+          },
+          "android": {
+            "backgroundColor": "#FFFFFF",
+            "backgroundColorDark": "#333333",
+            "defaultDisplay": "text",
+            "imageType": "appIcon",
+            "newImage": "assets/defaults/app-icon-placeholder.png",
+            "newImageDark": "assets/defaults/app-icon-placeholder.png",
+            "textColor": "#1A100B",
+            "textColorDark": "#FFFFFF",
+            "hideOnScroll": false
+          }
+        },
+        "autoNewWindows": {
+          "active": true,
+          "items": []
+        }
+      },
+      "sidebarNavigationBar": {
+        "styling": {
+          "ios": {
+            "backgroundColor": "#f8f8f8",
+            "backgroundColorDark": "#202020",
+            "sidebarFont": "Default",
+            "sidebarImage": "assets/defaults/logo1.png",
+            "sidebarImageDark": "assets/defaults/logo1.png",
+            "textColor": "#0E0D08",
+            "textColorDark": "#ffffff",
+            "type": "appIcon"
+          },
+          "android": {
+            "showAppName": true,
+            "showLogo": true,
+            "backgroundColor": "#FFFFFF",
+            "backgroundColorDark": "#333333",
+            "foregroundColor": "#1A100B",
+            "foregroundColorDark": "#FFFFFF",
+            "separatorColor": "#CCCCCC",
+            "separatorColorDark": "#666666",
+            "highlightColor": "#1A100B",
+            "highlightColorDark": "#FFFFFF"
+          }
+        }
+      },
+      "bottomTabBar": {
+        "styling": {
+          "android": {
+            "backgroundColor": "#FFFFFF",
+            "backgroundColorDark": "#333333",
+            "textColor": "#949494",
+            "textColorDark": "#FFFFFF",
+            "indicatorColor": "#1A100B",
+            "indicatorColorDark": "#666666",
+            "hideOnScroll": false
+          },
+          "ios": {
+            "tintColor": "#f8f8f8",
+            "tintColorDark": "#000000",
+            "inactiveColor": "#A1A1A1",
+            "inactiveColorDark": "#818181",
+            "hideOnScroll": false
+          }
+        }
+      },
+      "contextualNavToolbar": {
+        "styling": {
+          "backgroundColor": "#ffffff",
+          "backgroundColorDark": "#333333"
+        }
+      }
+    },
+    "instances": [
+      {
+        "id": "default",
+        "name": "Default",
+        "visibleIn": "**",
+        "custom": false,
+        "components": {
+          "topNavigationBar": {
+            "active": false,
+            "items": [],
+            "dynamicTitle": {
+              "customTitle": true,
+              "showImage": false,
+              "title": "",
+              "titles": []
+            },
+            "allowLeftMenu": false
+          },
+          "sidebarNavigationBar": {
+            "active": false,
+            "items": [
+              {
+                "url": "https://roberthalf.com/us/en/jobs",
+                "label": "Browse jobs",
+                "subLinks": []
+              },
+              {
+                "url": "https://roberthalf.com/us/en/find-jobs/upload-resume",
+                "label": "Find the right job type for you",
+                "subLinks": []
+              },
+              {
+                "url": "https://roberthalf.com/us/en/find-jobs/partner",
+                "label": "Explore how we help job seekers",
+                "subLinks": []
+              },
+              {
+                "url": "https://roberthalf.com/us/en/accounting-finance",
+                "label": "Finance and accounting",
+                "subLinks": []
+              },
+              {
+                "url": "https://roberthalf.com/us/en/tech-it",
+                "label": "Technology",
+                "subLinks": []
+              },
+              {
+                "url": "https://roberthalf.com/us/en/marketing-creative",
+                "label": "Marketing and creative",
+                "subLinks": []
+              },
+              {
+                "url": "https://roberthalf.com/us/en/administrative",
+                "label": "Administrative and customer support",
+                "subLinks": []
+              },
+              {
+                "url": "https://roberthalf.com/us/en/legal",
+                "label": "Legal",
+                "subLinks": []
+              },
+              {
+                "url": "https://roberthalf.com/us/en/hire-talent/find-candidates",
+                "label": "Preview candidates",
+                "subLinks": []
+              },
+              {
+                "url": "https://roberthalf.com/us/en/hire-talent/flexible-staffing",
+                "label": "Contract talent",
+                "subLinks": []
+              },
+              {
+                "url": "https://roberthalf.com/us/en/hire-talent/full-time-staffing",
+                "label": "Permanent talent",
+                "subLinks": []
+              },
+              {
+                "url": "https://roberthalf.com/us/en/hire-talent/partner",
+                "label": "Learn how we work with you",
+                "subLinks": []
+              },
+              {
+                "url": "https://roberthalf.com/us/en/hire-talent/executive-search",
+                "label": "Executive search",
+                "subLinks": []
+              },
+              {
+                "url": "https://roberthalf.com/us/en/consulting/tech",
+                "label": "Technology",
+                "subLinks": []
+              },
+              {
+                "url": "https://roberthalf.com/us/en/consulting/risk-compliance-audit",
+                "label": "Risk, audit and compliance",
+                "subLinks": []
+              },
+              {
+                "url": "https://roberthalf.com/us/en/consulting/finance",
+                "label": "Finance and accounting",
+                "subLinks": []
+              },
+              {
+                "url": "https://roberthalf.com/us/en/consulting/digital",
+                "label": "Digital, marketing and customer experience",
+                "subLinks": []
+              },
+              {
+                "url": "https://roberthalf.com/us/en/consulting/legal",
+                "label": "Legal",
+                "subLinks": []
+              },
+              {
+                "url": "https://roberthalf.com/us/en/consulting/administrative",
+                "label": "Operations",
+                "subLinks": []
+              },
+              {
+                "url": "https://roberthalf.com/us/en/consulting/human-resources",
+                "label": "Human resources",
+                "subLinks": []
+              },
+              {
+                "url": "https://roberthalf.com/us/en/insights/salary-guide",
+                "label": "2025 salary guide",
+                "subLinks": []
+              },
+              {
+                "url": "https://roberthalf.com/us/en/insights/salary-hiring-trends/demand-for-skilled-talent",
+                "label": "Demand for skilled talent report",
+                "subLinks": []
+              },
+              {
+                "url": "https://roberthalf.com/us/en/insights/building-tech-teams",
+                "label": "Building future-forward tech teams",
+                "subLinks": []
+              },
+              {
+                "url": "https://roberthalf.com/us/en/insights/job-market-outlook",
+                "label": "Job market outlook",
+                "subLinks": []
+              },
+              {
+                "url": "https://press.roberthalf.com/",
+                "label": "Press room",
+                "subLinks": []
+              },
+              {
+                "url": "https://roberthalf.com/us/en/insights/salary-hiring-trends",
+                "label": "Salary and hiring trends",
+                "subLinks": []
+              },
+              {
+                "url": "https://roberthalf.com/us/en/insights/flexible-working",
+                "label": "Adaptive working",
+                "subLinks": []
+              },
+              {
+                "url": "https://roberthalf.com/us/en/insights/competitive-advantage",
+                "label": "Competitive advantage",
+                "subLinks": []
+              },
+              {
+                "url": "https://roberthalf.com/us/en/insights/work-life-balance",
+                "label": "Work/life balance",
+                "subLinks": []
+              },
+              {
+                "url": "https://roberthalf.com/us/en/insights/diversity-equity-inclusion",
+                "label": "Diversity and inclusion",
+                "subLinks": []
+              },
+              {
+                "url": "https://roberthalf.com/us/en/hire-talent/form",
+                "label": "Find your next hire",
+                "subLinks": []
+              },
+              {
+                "url": "https://roberthalf.com/us/en/locations",
+                "label": "Our locations",
+                "subLinks": []
+              },
+              {
+                "url": "https://roberthalf.com/us/en/consulting#form",
+                "label": "Find your consulting solution",
+                "subLinks": []
+              },
+              {
+                "url": "https://roberthalf.com/us/en/consulting",
+                "label": "Learn more",
+                "subLinks": []
+              },
+              {
+                "url": "https://roberthalf.com/us/en/find-jobs",
+                "label": "Learn more",
+                "subLinks": []
+              },
+              {
+                "url": "https://roberthalf.com/us/en/job-details/controller",
+                "label": "Controller",
+                "subLinks": []
+              },
+              {
+                "url": "https://roberthalf.com/us/en/job-details/senior-accountant-general-accounting",
+                "label": "Senior accountant",
+                "subLinks": []
+              },
+              {
+                "url": "https://roberthalf.com/us/en/job-details/senior-financial-analyst",
+                "label": "Senior financial analyst",
+                "subLinks": []
+              },
+              {
+                "url": "https://roberthalf.com/us/en/job-details/internal-auditor-1-3-years-experience-financial-services",
+                "label": "Internal auditor",
+                "subLinks": []
+              },
+              {
+                "url": "https://roberthalf.com/us/en/job-details/accounts-payable-clerk",
+                "label": "Accounts payable/receivable specialist",
+                "subLinks": []
+              },
+              {
+                "url": "https://roberthalf.com/us/en/job-details/bookkeeper",
+                "label": "Bookkeeper",
+                "subLinks": []
+              },
+              {
+                "url": "https://roberthalf.com/us/en/job-details/software-engineerdeveloper",
+                "label": "Software developer",
+                "subLinks": []
+              },
+              {
+                "url": "https://roberthalf.com/us/en/job-details/data-analyst-technology",
+                "label": "Data analyst",
+                "subLinks": []
+              },
+              {
+                "url": "https://roberthalf.com/us/en/job-details/it-systems-analyst",
+                "label": "Systems analyst",
+                "subLinks": []
+              },
+              {
+                "url": "https://roberthalf.com/us/en/job-details/product-support-specialist",
+                "label": "Product support specialist",
+                "subLinks": []
+              },
+              {
+                "url": "https://roberthalf.com/us/en/job-details/networkcloud-administrator",
+                "label": "Network administrator",
+                "subLinks": []
+              },
+              {
+                "url": "https://roberthalf.com/us/en/job-details/web-developer",
+                "label": "Web developer",
+                "subLinks": []
+              },
+              {
+                "url": "https://roberthalf.com/us/en/job-details/administrative-assistant",
+                "label": "Administrative assistant",
+                "subLinks": []
+              },
+              {
+                "url": "https://roberthalf.com/us/en/job-details/executive-assistant",
+                "label": "Executive assistant",
+                "subLinks": []
+              },
+              {
+                "url": "https://roberthalf.com/us/en/job-details/customer-experience-specialist",
+                "label": "Customer experience representative",
+                "subLinks": []
+              },
+              {
+                "url": "https://roberthalf.com/us/en/job-details/receptionist",
+                "label": "Receptionist",
+                "subLinks": []
+              },
+              {
+                "url": "https://roberthalf.com/us/en/job-details/office-specialist",
+                "label": "Office specialist",
+                "subLinks": []
+              },
+              {
+                "url": "https://roberthalf.com/us/en/job-details/data-entry-specialist",
+                "label": "Data entry specialist",
+                "subLinks": []
+              },
+              {
+                "url": "https://roberthalf.com/us/en/job-details/graphic-designer",
+                "label": "Graphic designer",
+                "subLinks": []
+              },
+              {
+                "url": "https://roberthalf.com/us/en/job-details/copywriter",
+                "label": "Copywriter",
+                "subLinks": []
+              },
+              {
+                "url": "https://roberthalf.com/us/en/job-details/production-artist",
+                "label": "Production artist",
+                "subLinks": []
+              },
+              {
+                "url": "https://roberthalf.com/us/en/job-details/digital-marketing-specialist",
+                "label": "Digital marketing specialist",
+                "subLinks": []
+              },
+              {
+                "url": "https://roberthalf.com/us/en/job-details/user-experience-ux-designer",
+                "label": "Ux designer",
+                "subLinks": []
+              },
+              {
+                "url": "https://roberthalf.com/us/en/job-details/marketing-manager",
+                "label": "Marketing manager",
+                "subLinks": []
+              },
+              {
+                "url": "https://roberthalf.com/us/en/job-details/lawyerattorney-2-3-years-experience",
+                "label": "Lawyer",
+                "subLinks": []
+              },
+              {
+                "url": "https://roberthalf.com/us/en/job-details/paralegal-2-3-years-experience",
+                "label": "Paralegal",
+                "subLinks": []
+              },
+              {
+                "url": "https://roberthalf.com/us/en/job-details/legal-assistant",
+                "label": "Legal assistant",
+                "subLinks": []
+              },
+              {
+                "url": "https://roberthalf.com/us/en/job-details/in-house-counsel-4-9-years-experience",
+                "label": "In-house counsel",
+                "subLinks": []
+              },
+              {
+                "url": "https://roberthalf.com/us/en/job-details/contract-administrator-4-6-years-experience",
+                "label": "Contract administrator",
+                "subLinks": []
+              },
+              {
+                "url": "https://roberthalf.com/us/en/job-details/legal-secretary-1-2-years-experience",
+                "label": "Legal secretary",
+                "subLinks": []
+              },
+              {
+                "url": "https://roberthalf.com/us/en/about/our-company",
+                "label": "See all accolades",
+                "subLinks": []
+              },
+              {
+                "url": "https://roberthalf.com/us/en/insights",
+                "label": "Discover insights",
+                "subLinks": []
+              },
+              {
+                "url": "https://roberthalf.com/us/en/pay",
+                "label": "Invoice",
+                "subLinks": []
+              },
+              {
+                "url": "https://roberthalf.com/us/en/job-details-all",
+                "label": "Job directory",
+                "subLinks": []
+              },
+              {
+                "url": "https://roberthalf.com/us/en/login",
+                "label": "Time reports",
+                "subLinks": []
+              },
+              {
+                "url": "https://roberthalf.com/us/en/contact",
+                "label": "Contact us",
+                "subLinks": []
+              },
+              {
+                "url": "https://roberthalf.com/us/en/about/about-robert-half",
+                "label": "About robert half",
+                "subLinks": []
+              },
+              {
+                "url": "https://roberthalf.com/us/en/about/leadership",
+                "label": "Leadership",
+                "subLinks": []
+              },
+              {
+                "url": "https://careers.roberthalf.com/global/en/home",
+                "label": "Careers with us",
+                "subLinks": []
+              },
+              {
+                "url": "https://roberthalf.com/us/en/about/investor-center",
+                "label": "Investor center",
+                "subLinks": []
+              },
+              {
+                "url": "https://roberthalf.com/us/en/about/our-company/brands",
+                "label": "Our brands",
+                "subLinks": []
+              },
+              {
+                "url": "https://roberthalf.com/us/en/about/supplier-relations",
+                "label": "Supplier relations",
+                "subLinks": []
+              },
+              {
+                "url": "https://www.facebook.com/pages/Robert-Half/182444181913924",
+                "label": "",
+                "subLinks": []
+              },
+              {
+                "url": "https://www.linkedin.com/company/robert-half-international",
+                "label": "",
+                "subLinks": []
+              },
+              {
+                "url": "https://twitter.com/roberthalf",
+                "label": "",
+                "subLinks": []
+              },
+              {
+                "url": "https://www.youtube.com/roberthalfna",
+                "label": "",
+                "subLinks": []
+              },
+              {
+                "url": "https://www.instagram.com/roberthalf/",
+                "label": "",
+                "subLinks": []
+              },
+              {
+                "url": "https://roberthalf.com/us/en/fraud-alert",
+                "label": "Fraud alert",
+                "subLinks": []
+              },
+              {
+                "url": "https://roberthalf.com/us/en/government-notice",
+                "label": "Government notice",
+                "subLinks": []
+              },
+              {
+                "url": "https://roberthalf.com/us/en/privacy",
+                "label": "Privacy notice",
+                "subLinks": []
+              },
+              {
+                "url": "https://roberthalf.com/us/en/terms",
+                "label": "Terms of use",
+                "subLinks": []
+              },
+              {
+                "url": "https://roberthalf.com/us/en/equal-opportunity-employer",
+                "label": "An equal opportunity employer",
+                "subLinks": []
+              },
+              {
+                "url": "https://roberthalf.com/#",
+                "label": "Do not sell or share my personal information",
+                "subLinks": []
+              },
+              {
+                "url": "https://www.roberthalf.com/au/en",
+                "label": "Australia - english",
+                "subLinks": []
+              },
+              {
+                "url": "https://www.roberthalf.com/be/en",
+                "label": "Belgium - english",
+                "subLinks": []
+              },
+              {
+                "url": "https://www.roberthalf.com/be/nl",
+                "label": "Belgium - nederlands",
+                "subLinks": []
+              },
+              {
+                "url": "https://www.roberthalf.com/be/fr",
+                "label": "Belgium - français",
+                "subLinks": []
+              },
+              {
+                "url": "https://www.roberthalf.com/br/pt",
+                "label": "Brazil - português",
+                "subLinks": []
+              },
+              {
+                "url": "https://www.roberthalf.com/ca/en",
+                "label": "Canada - english",
+                "subLinks": []
+              },
+              {
+                "url": "https://www.roberthalf.com/ca/fr",
+                "label": "Canada - français",
+                "subLinks": []
+              },
+              {
+                "url": "https://www.roberthalf.com/cl/es",
+                "label": "Chile - español",
+                "subLinks": []
+              },
+              {
+                "url": "https://www.roberthalf.cn/cn/en",
+                "label": "China - english",
+                "subLinks": []
+              },
+              {
+                "url": "https://www.roberthalf.cn/cn/zh",
+                "label": "China - 中文",
+                "subLinks": []
+              },
+              {
+                "url": "https://www.roberthalf.com/fr/fr",
+                "label": "France - français",
+                "subLinks": []
+              },
+              {
+                "url": "https://www.roberthalf.com/de/de",
+                "label": "Germany - deutsch",
+                "subLinks": []
+              },
+              {
+                "url": "https://www.roberthalf.com/hk/en",
+                "label": "Hong kong, china - english",
+                "subLinks": []
+              },
+              {
+                "url": "https://www.roberthalf.com/ie/en",
+                "label": "Ireland - english",
+                "subLinks": []
+              },
+              {
+                "url": "https://www.roberthalf.com/jp/en",
+                "label": "Japan - english",
+                "subLinks": []
+              },
+              {
+                "url": "https://www.roberthalf.com/jp/ja",
+                "label": "Japan - 日本語",
+                "subLinks": []
+              },
+              {
+                "url": "https://www.roberthalf.com/lu/en",
+                "label": "Luxembourg - english",
+                "subLinks": []
+              },
+              {
+                "url": "https://www.roberthalf.com/lu/fr",
+                "label": "Luxembourg - français",
+                "subLinks": []
+              },
+              {
+                "url": "https://www.roberthalf.com/nl/en",
+                "label": "Netherlands - english",
+                "subLinks": []
+              },
+              {
+                "url": "https://www.roberthalf.com/nl/nl",
+                "label": "Netherlands - nederlands",
+                "subLinks": []
+              },
+              {
+                "url": "https://www.roberthalf.com/nz/en",
+                "label": "New zealand - english",
+                "subLinks": []
+              },
+              {
+                "url": "https://www.roberthalf.com/sg/en",
+                "label": "Singapore - english",
+                "subLinks": []
+              },
+              {
+                "url": "https://www.roberthalf.com/ch/de",
+                "label": "Switzerland - deutsch",
+                "subLinks": []
+              },
+              {
+                "url": "https://www.roberthalf.com/ch/en",
+                "label": "Switzerland - english",
+                "subLinks": []
+              },
+              {
+                "url": "https://www.roberthalf.com/ch/fr",
+                "label": "Switzerland - français",
+                "subLinks": []
+              },
+              {
+                "url": "https://www.roberthalf.com/ae/en",
+                "label": "United arab emirates - english",
+                "subLinks": []
+              },
+              {
+                "url": "https://www.roberthalf.com/gb/en",
+                "label": "United kingdom - english",
+                "subLinks": []
+              },
+              {
+                "url": "https://www.roberthalf.com/us/en",
+                "label": "United states - english",
+                "subLinks": []
+              }
+            ]
+          },
+          "bottomTabBar": {
+            "active": false,
+            "items": []
+          },
+          "contextualNavToolbar": {
+            "active": false,
+            "items": [
+              {
+                "system": "back",
+                "visibility": "backButtonActive",
+                "titleType": "defaultText"
+              },
+              {
+                "system": "forward",
+                "enabled": false,
+                "titleType": "defaultText"
+              },
+              {
+                "system": "refresh",
+                "enabled": false
+              }
+            ]
+          }
+        }
+      }
+    ]
   },
   "styling": {
     "splashScreen": {
@@ -789,31 +1577,17 @@
         "animationLoop": "once",
         "backgroundColor": "#FFFFFF",
         "backgroundColorDark": "#000000",
-        "backgroundImage": "https://s3.amazonaws.com/gonativeio/app_files/dnoknk/1729276026614_bqb4guggfz7e6_FFFFFF_1_2x2.png",
-        "backgroundImageDark": "https://s3.amazonaws.com/gonativeio/app_files/dnoknk/1729276026629_yjmcubw3da7mc_000000_1_2x2.png",
         "animated": false,
-        "centerImage": "https://s3.amazonaws.com/gonativeio/app_files/dnoknk/app_icon_uhpznf84n227r_1729276026.png",
-        "centerImageDark": "https://s3.amazonaws.com/gonativeio/app_files/dnoknk/app_icon_uhpznf84n227r_1729276026.png",
         "animation": null,
         "animationDark": null,
         "animationFrame": null,
-        "animationFrameDark": null
+        "animationFrameDark": null,
+        "centerImage": "https://s3.amazonaws.com/gonativeio/app_files/dnoknk/app_icon_uhpznf84n227r_1729276026.png",
+        "centerImageDark": "https://s3.amazonaws.com/gonativeio/app_files/dnoknk/app_icon_uhpznf84n227r_1729276026.png"
       },
       "android": {
-        "launchImages": {
-          "mdpi": "https://s3.amazonaws.com/gonativeio/app_files/dnoknk/1729276026792_dkb1eh7yqgxep_180x180.png",
-          "hdpi": "https://s3.amazonaws.com/gonativeio/app_files/dnoknk/1729276026804_p7tc03g06apg0_270x270.png",
-          "xhdpi": "https://s3.amazonaws.com/gonativeio/app_files/dnoknk/1729276026814_7a6t9ufpmc2q8_360x360.png",
-          "xxhdpi": "https://s3.amazonaws.com/gonativeio/app_files/dnoknk/1729276026820_xfe9gdawtw71a_540x540.png",
-          "xxxhdpi": "https://s3.amazonaws.com/gonativeio/app_files/dnoknk/1729276026831_9anppp1gup228_720x720.png"
-        },
-        "launchImagesDark": {
-          "mdpi": "https://s3.amazonaws.com/gonativeio/app_files/dnoknk/1729276026861_67t32wphpktuj_180x180.png",
-          "hdpi": "https://s3.amazonaws.com/gonativeio/app_files/dnoknk/1729276026895_bx5n5a0n6r210_270x270.png",
-          "xhdpi": "https://s3.amazonaws.com/gonativeio/app_files/dnoknk/1729276026927_k1krbna12dqhc_360x360.png",
-          "xxhdpi": "https://s3.amazonaws.com/gonativeio/app_files/dnoknk/1729276026955_vcadqub89yuz2_540x540.png",
-          "xxxhdpi": "https://s3.amazonaws.com/gonativeio/app_files/dnoknk/1729276026986_tq9b019knyv7r_720x720.png"
-        },
+        "launchImages": {},
+        "launchImagesDark": {},
         "showSplash": true,
         "animationLoop": "once",
         "backgroundColor": "#FFFFFF",
@@ -845,8 +1619,6 @@
     "iosNavigationBarTintColorDark": "#202020",
     "iosTabBarTintColor": "#f8f8f8",
     "iosTabBarTintColorDark": "#000000",
-    "icon": "https://s3.amazonaws.com/gonativeio/app_files/dnoknk/app_icon_uhpznf84n227r_1729276026.png",
-    "iosHeaderImage": "https://s3.amazonaws.com/gonativeio/app_files/dnoknk/app_icon_uhpznf84n227r_1729276026.png",
     "showActionBar": false,
     "showNavigationBar": false,
     "iosSidebarFont": "Default",
@@ -893,8 +1665,6 @@
     "androidSystemNavBarColor": "#FFFFFF",
     "androidSystemNavBarColorDark": "#000000",
     "androidWebviewTextZoom": null,
-    "androidIcon": "https://s3.amazonaws.com/gonativeio/app_files/dnoknk/app_icon_uhpznf84n227r_1729276026.png",
-    "iosIcon": "https://s3.amazonaws.com/gonativeio/app_files/dnoknk/app_icon_uhpznf84n227r_1729276026.png",
     "customIcons": {},
     "iosStatusBarStyle": "auto",
     "iosEnableOverlayInStatusBar": false,
@@ -911,9 +1681,18 @@
     "navigationTitleImageLocationDark": "assets/defaults/app-icon-placeholder.png",
     "androidHeaderImage": "assets/defaults/app-icon-placeholder.png",
     "androidHeaderImageDark": "assets/defaults/app-icon-placeholder.png",
-    "iosHeaderImageDark": "https://s3.amazonaws.com/gonativeio/app_files/dnoknk/app_icon_uhpznf84n227r_1729276026.png",
     "iosTabBarInactiveColor": "#A1A1A1",
-    "iosTabBarInactiveColorDark": "#818181"
+    "iosTabBarInactiveColorDark": "#818181",
+    "androidHideNavBarOnScroll": false,
+    "iosGlassDesign": false,
+    "iosHideNavBarOnScroll": false,
+    "iosTransparentNavBar": true,
+    "androidHideTabBarOnScroll": false,
+    "iosHideTabBarOnScroll": false,
+    "icon": "assets/defaults/app-icon-placeholder.png",
+    "iosIcon": "assets/defaults/app-icon-placeholder.png",
+    "androidIcon": "assets/defaults/app-icon-placeholder.png",
+    "initialZoom": null
   },
   "permissions": {
     "usesGeolocation": false,
@@ -924,7 +1703,8 @@
     "iosCameraUsageDescription": "",
     "iosMicrophoneUsageDescription": "",
     "iOSATTUserTrackingDescription": "",
-    "iOSRequestATTConsentOnLoad": false
+    "iOSRequestATTConsentOnLoad": false,
+    "iosPhotoLibraryUsageDescription": ""
   },
   "developmentTools": {
     "enableWebConsoleLogs": false

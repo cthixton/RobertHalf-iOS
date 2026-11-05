@@ -18,3 +18,12 @@
 
 /* Button: Share External */
 "button-share-link" = "링크 공유";
+
+/* Button: Done */
+"button-done" = "완료";
+
+/* Button: Back */
+"button-back" = "뒤로";
+
+/* Button: Forward */
+"button-forward" = "앞으로";

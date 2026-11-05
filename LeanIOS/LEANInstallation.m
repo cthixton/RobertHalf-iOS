@@ -8,15 +8,17 @@
 
 #import "LEANInstallation.h"
 #import "LEANAppDelegate.h"
+#import <AdSupport/AdSupport.h>
 #import <CoreTelephony/CTTelephonyNetworkInfo.h>
 #import <CoreTelephony/CTCarrier.h>
 #import <sys/utsname.h>
+@import MedianCoreKMP;
 
 @implementation LEANInstallation
 
 + (NSDictionary*)info
 {
-    NSString *publicKey = [GoNativeAppConfig sharedAppConfig].publicKey;
+    NSString *publicKey = MCKMPMutableConfig.shared.instance.configRoot.general.publicKey;
     if (!publicKey) publicKey = @"";
     
     BOOL debug = NO;
@@ -70,6 +72,7 @@
                            @"timeZone": timeZone,
                            @"hardware": hardware,
                            @"installationId": [device.identifierForVendor UUIDString],
+                           @"idfa": ASIdentifierManager.sharedManager.advertisingIdentifier.UUIDString,
                            @"deviceName": device.name} mutableCopy];
     
     LEANAppDelegate *appDelegate = (LEANAppDelegate*)[UIApplication sharedApplication].delegate;

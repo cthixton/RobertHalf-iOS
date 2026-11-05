@@ -7,7 +7,7 @@
 //
 
 #import "LEANUrlCache.h"
-#import <SSZipArchive.h>
+@import ZipArchive;
 
 @interface LEANUrlCache ()
 @property id manifest;

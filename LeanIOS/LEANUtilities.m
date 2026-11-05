@@ -10,6 +10,8 @@
 #import "GonativeIO-Swift.h"
 #import "LEANUtilities.h"
 #import "LEANAppDelegate.h"
+#import "LEANUserAgentManager.h"
+@import MedianCoreKMP;
 
 @implementation LEANUtilities
 
@@ -314,6 +316,18 @@
     }
 }
 
++ (void)overrideWindowPrint:(WKWebView *)webview {
+    NSString *js = @" "
+    " window.print = function () { "
+    "    var message = { windowMethod: 'window.print' };"
+    "    window.webkit?.messageHandlers?.windowOverride?.postMessage(message); "
+    " } "
+    " ";
+    
+    WKUserScript *userScript = [[WKUserScript alloc] initWithSource:js injectionTime:WKUserScriptInjectionTimeAtDocumentStart forMainFrameOnly:YES];
+    [webview.configuration.userContentController addUserScript:userScript];
+}
+
 + (void)matchStatusBarToBodyBackgroundColor:(WKWebView *)webview enabled:(BOOL)enabled {
     if (!webview) return;
     NSString *js = enabled
@@ -516,36 +530,39 @@
     if ([wv isKindOfClass:NSClassFromString(@"WKWebView")]) {
         WKWebView *webview = (WKWebView*)wv;
         webview.scrollView.bounces = NO;
-        if (@available(iOS 11.0, *)) {
-            webview.scrollView.contentInsetAdjustmentBehavior = UIScrollViewContentInsetAdjustmentNever;
+        webview.scrollView.contentInsetAdjustmentBehavior = UIScrollViewContentInsetAdjustmentNever;
+        
+        if ([LEANUtilities isGlassDesignEnabled]) {
+            webview.scrollView.showsHorizontalScrollIndicator = NO;
         }
         
-        GoNativeAppConfig *appConfig = [GoNativeAppConfig sharedAppConfig];
-        
-        // user script for customCSS
-        if (appConfig.hasCustomCSS) {
-            [LEANUtilities injectCss:@"customCSS" toWebview:webview];
-        }
-        
-        // user script for ios specific customCSS
-        if (appConfig.hasIosCustomCSS) {
-            [LEANUtilities injectCss:@"iosCustomCSS" toWebview:webview];
-        }
-        
-        // Disabling native bridge for unlicensed apps is taken care by the webview controller
-        if (appConfig.injectMedianJS) {
+        MCKMPMutableConfigState *appConfig = MCKMPMutableConfig.shared.instance;
+
+        // user scripts for custom CSS (the inject helpers no-op when the bundle file is absent)
+        [LEANUtilities injectCss:@"customCSS" toWebview:webview];
+        [LEANUtilities injectCss:@"iosCustomCSS" toWebview:webview];
+
+        if (appConfig.configRoot.general.injectMedianJS) {
             [LEANUtilities injectJs:@"GoNativeJSBridgeLibrary" ToWebview:webview];
         }
+
+        [LEANUtilities injectJs:@"customJS" ToWebview:webview];
+        [LEANUtilities injectJs:@"iosCustomJS" ToWebview:webview];
+
+        [[WebViewViewportManager shared] setViewportWithScale:appConfig.webviewZoom width:appConfig.configRoot.styling.forceViewportWidth webView:webview];
         
-        if (appConfig.hasCustomJS) {
-            [LEANUtilities injectJs:@"customJS" ToWebview:webview];
+        // Accessibility & Dynamic Type Support
+        UIContentSizeCategory contentSizeCategory = [UIApplication sharedApplication].preferredContentSizeCategory;
+        [self applyFontScalingForContentSize:contentSizeCategory toWebView:webview asUserScript:YES];
+        
+        [LEANUtilities overrideWindowPrint:webview];
+        
+        MCKMPPluginJSInjector *injector = [[MCKMPPluginJSInjector alloc] initWithAssetReader:[[MCKMPIOSAssetReader alloc] init]];
+        NSString *pluginScript = [injector combinedScript];
+        if (pluginScript && appConfig.configRoot.general.injectMedianJS) {
+            WKUserScript *pluginUserScript = [[NSClassFromString(@"WKUserScript") alloc] initWithSource:pluginScript injectionTime:WKUserScriptInjectionTimeAtDocumentStart forMainFrameOnly:YES];
+            [webview.configuration.userContentController addUserScript:pluginUserScript];
         }
-        
-        if (appConfig.hasIosCustomJS) {
-            [LEANUtilities injectJs:@"iosCustomJS" ToWebview:webview];
-        }
-        
-        [((LEANAppDelegate *)[UIApplication sharedApplication].delegate).bridge loadUserScriptsForContentController:webview.configuration.userContentController];
         
         // for our faux content-inset
         webview.scrollView.layer.masksToBounds = NO;
@@ -554,44 +571,63 @@
         webview.allowsLinkPreview = YES;
         
         // set user agent
-        webview.customUserAgent = [GoNativeAppConfig sharedAppConfig].userAgent;
+        webview.customUserAgent = [LEANUserAgentManager sharedManager].userAgent;
     }
 }
 
++ (void)getBodyBackgroundColor:(WKWebView *)webview completion:(void (^)(UIColor *))completion {
+    [webview evaluateJavaScript:@"median_get_body_background_color()" completionHandler:^(NSArray *result, NSError *error) {
+        if (error || ![result isKindOfClass:[NSArray class]]) {
+            completion([UIColor whiteColor]);
+            return;
+        }
+        
+        CGFloat r = [result[0] floatValue];
+        CGFloat g = [result[1] floatValue];
+        CGFloat b = [result[2] floatValue];
+        
+        completion([UIColor colorWithRed:r green:g blue:b alpha:1]);
+    }];
 
-+ (void)configureViewportOfWebView:(WKWebView *)webview {
-    NSNumber *viewportWidth = [GoNativeAppConfig sharedAppConfig].forceViewportWidth;
-    NSString *pinchToZoom = [GoNativeAppConfig sharedAppConfig].pinchToZoom ? @"yes" : @"no";
-    
-    NSString *stringViewport = @"";
-    if (viewportWidth) {
-        stringViewport = [NSString stringWithFormat:@"width=%@,user-scalable=%@", viewportWidth, pinchToZoom];
+}
+
++ (void)applyFontScalingForContentSize:(NSString *)contentSizeCategory toWebView:(WKWebView *)webView asUserScript:(BOOL)asUserScript {
+    if (!MCKMPMutableConfig.shared.instance.configRoot.styling.iosDynamicType) {
+        return;
     }
     
-    if (!stringViewport) {
-        stringViewport = @"";
+    NSDictionary *fontScale = @{
+        UIContentSizeCategoryExtraSmall: @90,
+        UIContentSizeCategorySmall: @95,
+        UIContentSizeCategoryMedium: @100,
+        UIContentSizeCategoryLarge: @108,
+        UIContentSizeCategoryExtraLarge: @116,
+        UIContentSizeCategoryExtraExtraLarge: @124,
+        UIContentSizeCategoryExtraExtraExtraLarge: @132,
+        UIContentSizeCategoryAccessibilityMedium: @170,
+        UIContentSizeCategoryAccessibilityLarge: @190,
+        UIContentSizeCategoryAccessibilityExtraLarge: @210,
+        UIContentSizeCategoryAccessibilityExtraExtraLarge: @230,
+        UIContentSizeCategoryAccessibilityExtraExtraExtraLarge: @250,
+    };
+    
+    if (!fontScale[contentSizeCategory]) {
+        return;
     }
     
-    NSString *scriptSource = [NSString stringWithFormat:
-        @"var gonative_setViewport = %@; "
-        "var gonative_viewportElement = document.querySelector('meta[name=viewport]'); "
-        "if (gonative_viewportElement) { "
-        "    if (gonative_setViewport) { "
-        "        gonative_viewportElement.content = gonative_setViewport; "
-        "    } else { "
-        "        gonative_viewportElement.content = gonative_viewportElement.content + ',user-scalable=%@'; "
-        "    } "
-        "} else if (gonative_setViewport) { "
-        "    gonative_viewportElement = document.createElement('meta'); "
-        "    gonative_viewportElement.name = 'viewport'; "
-        "    gonative_viewportElement.content = gonative_setViewport; "
-        "    document.head.appendChild(gonative_viewportElement); "
-        "}",
-        [LEANUtilities jsWrapString:stringViewport],
-        pinchToZoom
-    ];
-
-    [webview evaluateJavaScript:scriptSource completionHandler:nil];
+    NSString *createStyleJs = @" "
+    "   var style = document.createElement('style'); "
+    "   style.innerHTML = 'body { -webkit-text-size-adjust: %@%%; }'; "
+    "   document.head.appendChild(style); "
+    " ";
+    NSString *js = [NSString stringWithFormat:createStyleJs, fontScale[contentSizeCategory]];
+    
+    if (asUserScript) {
+        WKUserScript *userScript = [[WKUserScript alloc] initWithSource:js injectionTime:WKUserScriptInjectionTimeAtDocumentEnd forMainFrameOnly:YES];
+        [webView.configuration.userContentController addUserScript:userScript];
+    } else {
+        [webView evaluateJavaScript:js completionHandler:nil];
+    }
 }
 
 +(void)removeDoubleTapFromView:(UIView *)view {
@@ -741,27 +777,23 @@
 
 +(BOOL)checkNativeBridgeUrl:(NSString*)url
 {
-    GoNativeAppConfig *appConfig = [GoNativeAppConfig sharedAppConfig];
-    if (!appConfig.nativeBridgeUrls || appConfig.nativeBridgeUrls.count == 0) {
+    NSArray<NSString *> *nativeBridgeUrls = MCKMPMutableConfig.shared.instance.configRoot.general.nativeBridgeUrls;
+    if (nativeBridgeUrls.count == 0) {
         return YES;
     }
-    
-    BOOL matched = NO;
-    for (NSPredicate *predicate in appConfig.nativeBridgeUrls) {
-        BOOL matches = NO;
+
+    for (NSString *regex in nativeBridgeUrls) {
         @try {
-            matches = [predicate evaluateWithObject:url];
+            NSPredicate *predicate = [NSPredicate predicateWithFormat:@"SELF MATCHES %@", regex];
+            if ([predicate evaluateWithObject:url]) {
+                return YES;
+            }
         }
         @catch (NSException* exception) {
             NSLog(@"Regex error in nativeBridgeUrls: %@", exception);
         }
-
-        if (matches) {
-            matched = YES;
-            break;
-        }
     }
-    return matched;
+    return NO;
 }
 
 +(BOOL)cookie:(NSHTTPCookie*)cookie matchesUrl:(NSURL*)url
@@ -814,12 +846,12 @@
 + (void)createRequestFromUrl:(NSURL *)url completion:(void (^)(NSURLRequest *request))completion {
     NSMutableURLRequest *request = [NSMutableURLRequest requestWithURL:url];
     
-    NSString *userAgent = [[GoNativeAppConfig sharedAppConfig] userAgentForUrl:url];
+    NSString *userAgent = [MCKMPMutableConfig.shared.instance.configRoot.general userAgentForUrlUrl:url.absoluteString ?: @""] ?: [LEANUserAgentManager sharedManager].userAgent;
     if (userAgent) {
         [request setValue:userAgent forHTTPHeaderField:@"User-Agent"];
     }
-    
-    if (![GoNativeAppConfig sharedAppConfig].useWKWebView) {
+
+    if (!MCKMPMutableConfig.shared.instance.configRoot.general.useWKWebView) {
         completion(request);
         return;
     }
@@ -887,6 +919,15 @@
     }
 
     return image.size.width == 1 && image.size.height == 1;
+}
+
++ (BOOL)isGlassDesignEnabled {
+    if (@available(iOS 26.0, *)) {
+        id value = [[NSBundle mainBundle] objectForInfoDictionaryKey:@"UIDesignRequiresCompatibility"];
+        return ![value boolValue];
+    } else {
+        return NO;
+    }
 }
 
 @end

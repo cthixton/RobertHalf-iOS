@@ -13,6 +13,8 @@
 #import "LEANDocumentSharer.h"
 #import "LEANUrlCache.h"
 #import "GNCustomHeaders.h"
+#import "LEANUserAgentManager.h"
+@import MedianCoreKMP;
 
 static NSPredicate* schemeHttpTest;
 static NSOperationQueue* queue;
@@ -56,7 +58,7 @@ static LEANUrlCache *urlCache;
 
 + (BOOL)canInitWithRequest:(NSURLRequest *)request {
     NSString* userAgent = [request valueForHTTPHeaderField:@"User-Agent"];
-    if (userAgent && ![userAgent isEqualToString:[GoNativeAppConfig sharedAppConfig].userAgent]) return NO;
+    if (userAgent && ![userAgent isEqualToString:[LEANUserAgentManager sharedManager].userAgent]) return NO;
     if (![schemeHttpTest evaluateWithObject:request.URL]) return NO;
     if ([self propertyForKey:kOurRequestProperty inRequest:request]) return NO;
     
@@ -102,7 +104,7 @@ static LEANUrlCache *urlCache;
         self.modifiedRequest = request.mutableCopy;
         
         // custom user agent
-        NSString *customUserAgent = [[GoNativeAppConfig sharedAppConfig] userAgentForUrl:request.URL];
+        NSString *customUserAgent = [MCKMPMutableConfig.shared.instance.configRoot.general userAgentForUrlUrl:request.URL.absoluteString ?: @""];
         if (customUserAgent) {
             [self.modifiedRequest setValue:customUserAgent forHTTPHeaderField:@"User-Agent"];
         }
@@ -186,13 +188,9 @@ static LEANUrlCache *urlCache;
     }
     
     // string replacements
-    for (NSDictionary *entry in [GoNativeAppConfig sharedAppConfig].replaceStrings) {
-        if ([entry isKindOfClass:[NSDictionary class]]) {
-            NSString *old = entry[@"old"];
-            NSString *new = entry[@"new"];
-            if ([old isKindOfClass:[NSString class]] && [new isKindOfClass:[NSString class]]) {
-                htmlString = [htmlString stringByReplacingOccurrencesOfString:old withString:new];
-            }
+    for (MCKMPReplaceStringRule *entry in MCKMPMutableConfig.shared.instance.configRoot.general.replaceStrings) {
+        if (entry.old.length > 0) {
+            htmlString = [htmlString stringByReplacingOccurrencesOfString:entry.old withString:entry.new_];
         }
     }
     
@@ -202,9 +200,10 @@ static LEANUrlCache *urlCache;
         NSURL *cssFile = [[NSBundle mainBundle] URLForResource:@"customCSS" withExtension:@"css"];
         NSString *customCss = [NSString stringWithContentsOfURL:cssFile encoding:NSUTF8StringEncoding error:nil];
         
-        NSString *stringViewport = [GoNativeAppConfig sharedAppConfig].stringViewport;
-        NSNumber *viewportWidth = [GoNativeAppConfig sharedAppConfig].forceViewportWidth;
-        NSString *pinchToZoom = [GoNativeAppConfig sharedAppConfig].pinchToZoom ? @"yes" : @"no";
+        MCKMPStylingConfig *styling = MCKMPMutableConfig.shared.instance.configRoot.styling;
+        NSString *stringViewport = styling.stringViewport;
+        NSNumber *viewportWidth = styling.forceViewportWidth;
+        NSString *pinchToZoom = styling.pinchToZoom ? @"yes" : @"no";
         
         NSMutableString *newString = [[htmlString substringToIndex:insertPoint.location] mutableCopy];
         if (customCss) {

@@ -5,7 +5,25 @@
 "button-ok" = "OK";
 
 /* iOS Button: View */
-"button-view" = "Megnéz";
+"button-view" = "Megtekintés";
 
 /* iOS Button: Menu */
 "button-menu" = "Menü";
+
+/* Button: Done */
+"button-done" = "Kész";
+
+/* Button: Copy Link */
+"button-copy-link" = "Hivatkozás másolása";
+
+/* Button: Open External */
+"button-open-external" = "Megnyitás külső böngészőben";
+
+/* Button: Share External */
+"button-share-link" = "Hivatkozás megosztása";
+
+/* Button: Back */
+"button-back" = "Vissza";
+
+/* Button: Forward */
+"button-forward" = "Előre";

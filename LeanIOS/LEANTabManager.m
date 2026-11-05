@@ -9,29 +9,34 @@
 #import "LEANTabManager.h"
 #import "LEANUtilities.h"
 #import "GonativeIO-Swift.h"
+@import MedianCoreKMP;
 
 @interface LEANTabManager() <UITabBarDelegate>
 @property UITabBar *tabBar;
 @property NSArray *menu;
 @property (weak, nonatomic) LEANWebViewController* wvc;
 @property NSString *currentMenuID;
-@property BOOL showTabBar;
+@property MCKMPBottomTabComponent *nav2Component;
 @property NSMutableDictionary<NSObject*, NSArray<NSPredicate*>*> *tabRegexCache;
 @end
 
 @implementation LEANTabManager
 
-- (instancetype)initWithTabBar:(UITabBar*)tabBar webviewController:(LEANWebViewController*)wvc;
-{
+- (instancetype)initWithTabBar:(UITabBar*)tabBar heightConstraint:(NSLayoutConstraint *)heightConstraint wvc:(LEANWebViewController*)wvc {
     self = [super init];
     if (self) {
         self.tabBar = tabBar;
         self.tabBar.delegate = self;
-        self.tabBar.unselectedItemTintColor = [UIColor colorNamed:@"inactiveTabBarItemColor"];
         self.wvc = wvc;
-        self.showTabBar = NO;
+        self.isShowingTabBar = NO;
         self.javascriptTabs = NO;
         self.tabRegexCache = [NSMutableDictionary dictionary];
+        
+        if ([LEANUtilities isGlassDesignEnabled]) {
+            heightConstraint.active = NO;
+        } else {
+            self.tabBar.unselectedItemTintColor = [UIColor colorNamed:@"inactiveTabBarItemColor"];
+        }
     }
     return self;
 }
@@ -43,23 +48,28 @@
         return;
     }
     
-    NSArray *tabMenuRegexes = [GoNativeAppConfig sharedAppConfig].tabMenuRegexes;
-    if (!tabMenuRegexes || !url) return;
-    
+    MCKMPTabNavigationConfig *tabNav = MCKMPMutableConfig.shared.instance.configRoot.navigation.tabNavigation;
+    if (!tabNav.active || tabNav.tabSelectionConfig.count == 0 || !url) return;
+
     NSString *urlString = [url absoluteString];
-    
+
     BOOL showTabBar = NO;
-    for (NSUInteger i = 0; i < [tabMenuRegexes count]; i++) {
-        NSPredicate *predicate = tabMenuRegexes[i];
-        if ([predicate evaluateWithObject:urlString]) {
-            [self loadTabBarMenu:[GoNativeAppConfig sharedAppConfig].tabMenuIDs[i]];
-            showTabBar = YES;
-            break;
+    for (MCKMPTabSelectionRule *rule in tabNav.tabSelectionConfig) {
+        @try {
+            NSPredicate *predicate = [NSPredicate predicateWithFormat:@"SELF MATCHES %@", rule.regex];
+            if ([predicate evaluateWithObject:urlString]) {
+                [self loadTabBarMenu:rule.id];
+                showTabBar = YES;
+                break;
+            }
+        }
+        @catch (NSException* exception) {
+            NSLog(@"Error in tab selection regex: %@", exception);
         }
     }
     
     if (showTabBar) {
-        if (!self.showTabBar) {
+        if (!self.isShowingTabBar) {
             // select first item
             if ([self.tabBar.items count] > 0 && !self.tabBar.selectedItem) {
                 self.tabBar.selectedItem = self.tabBar.items[0];
@@ -70,8 +80,48 @@
         [self.wvc hideTabBarAnimated:YES];
     }
     
-    self.showTabBar = showTabBar;
+    self.isShowingTabBar = showTabBar;
     
+    [self autoSelectTabForUrl:url];
+}
+
+// nav2: MenuBarItems from the resolved instance drive the existing tab bar machinery
+- (void)loadNav2Component:(MCKMPBottomTabComponent *)component forUrl:(NSURL *)url
+{
+    if (self.javascriptTabs) {
+        [self autoSelectTabForUrl:url];
+        return;
+    }
+
+    if (!component || !component.active || component.items.count == 0) {
+        self.nav2Component = nil;
+        self.isShowingTabBar = NO;
+        [self.wvc hideTabBarAnimated:YES];
+        return;
+    }
+
+    self.nav2Component = component;
+    NSMutableArray *menu = [NSMutableArray arrayWithCapacity:component.items.count];
+    for (MCKMPMenuBarItem *item in component.items) {
+        NSMutableDictionary *entry = [NSMutableDictionary dictionary];
+        entry[@"label"] = item.label;
+        if (item.icon) entry[@"icon"] = item.icon;
+        if (item.inactiveIcon) entry[@"inactiveIcon"] = item.inactiveIcon;
+        if (item.url) entry[@"url"] = item.url;
+        [menu addObject:entry];
+    }
+
+    if (![menu isEqualToArray:self.menu]) {
+        self.currentMenuID = nil; // V1 menu no longer applies
+        [self setTabBarItems:menu];
+    }
+
+    if (!self.isShowingTabBar && self.tabBar.items.count > 0 && !self.tabBar.selectedItem) {
+        self.tabBar.selectedItem = self.tabBar.items[0];
+    }
+    [self.wvc showTabBarAnimated:YES];
+    self.isShowingTabBar = YES;
+
     [self autoSelectTabForUrl:url];
 }
 
@@ -81,11 +131,15 @@
         return;
     }
     
-    NSArray *menu = [GoNativeAppConfig sharedAppConfig].tabMenus[menuID];
-    
-    if (menu) {
-        self.currentMenuID = menuID;
-        [self setTabBarItems:menu];
+    for (MCKMPTabMenu *tabMenu in MCKMPMutableConfig.shared.instance.configRoot.navigation.tabNavigation.tabMenus) {
+        if (![tabMenu.id isEqualToString:menuID]) continue;
+        NSData *data = [[tabMenu itemsJson] dataUsingEncoding:NSUTF8StringEncoding];
+        NSArray *menu = [NSJSONSerialization JSONObjectWithData:data options:0 error:nil];
+        if ([menu isKindOfClass:[NSArray class]]) {
+            self.currentMenuID = menuID;
+            [self setTabBarItems:menu];
+        }
+        return;
     }
 }
 
@@ -100,7 +154,7 @@
 }
 
 - (CGFloat)sizeForIcon:(NSString *)iconName {
-    CGFloat size = 20;
+    CGFloat size = [LEANUtilities isGlassDesignEnabled] ? 20 : 24;
     if ([iconName hasPrefix:@"custom "]) {
         size = size * 1.1;
     } else if ([iconName hasPrefix:@"md "]) {
@@ -111,6 +165,7 @@
 
 - (UITabBarItem *)createOrUpdateTabBarItem:(UITabBarItem *)tabBarItem withTitle:(NSString *)title activeIcon:(NSString *)activeIcon inactiveIcon:(NSString *)inactiveIcon tag:(NSInteger)tag {
     UITabBarItem *item = tabBarItem;
+    
     if (!item) {
         if (!inactiveIcon) {
             inactiveIcon = activeIcon;
@@ -216,6 +271,14 @@
 
 - (void)autoSelectTabForUrl:(NSURL*)url
 {
+    if (self.nav2Component && !self.javascriptTabs) {
+        int32_t index = [self.nav2Component selectedItemIndexUrl:url.absoluteString ?: @""];
+        if (index >= 0 && index < self.tabBar.items.count) {
+            self.tabBar.selectedItem = self.tabBar.items[index];
+        }
+        return;
+    }
+
     if (!self.menu) return;
     
     NSString *urlString = [url absoluteString];
@@ -287,9 +350,9 @@
     if (![showTabBar isKindOfClass:[NSNumber class]]) {
        return;
     }
-    self.showTabBar = [showTabBar boolValue];
+    self.isShowingTabBar = [showTabBar boolValue];
 
-    if (self.showTabBar) {
+    if (self.isShowingTabBar) {
        NSArray *menu = json[@"items"];
        if ([menu isKindOfClass:[NSArray class]]) {
            [self setTabBarItems:menu];

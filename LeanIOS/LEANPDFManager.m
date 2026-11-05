@@ -9,6 +9,7 @@
 #import "LEANPDFManager.h"
 #import "LEANUtilities.h"
 #import "GonativeIO-Swift.h"
+@import MedianCoreKMP;
 
 #define TAB_BAR_HEIGHT 49
 
@@ -50,7 +51,7 @@
 
 - (void)setupNavigationBar {
     self.navigationController.navigationBar.scrollEdgeAppearance = self.navigationController.navigationBar.standardAppearance;
-    if ([[GoNativeAppConfig sharedAppConfig].iosTheme isEqualToString:@"dark"]) {
+    if ([MCKMPMutableConfig.shared.instance.configRoot.styling.iosTheme isEqualToString:@"dark"]) {
         self.navigationController.navigationBar.barStyle = UIBarStyleBlack;
         self.navigationController.view.backgroundColor = [UIColor blackColor];
     } else {

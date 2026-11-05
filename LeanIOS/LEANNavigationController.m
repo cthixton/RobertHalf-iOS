@@ -9,6 +9,8 @@
 #import "LEANNavigationController.h"
 #import "LEANWebViewController.h"
 #import "LEANRootViewController.h"
+#import "LEANUtilities.h"
+@import MedianCoreKMP;
 
 @interface LEANNavigationController () <UINavigationControllerDelegate>
 @end
@@ -19,11 +21,11 @@
 {
     [super viewDidLoad];
     
-    GoNativeAppConfig *appConfig = [GoNativeAppConfig sharedAppConfig];
-
-    // recognize swipe from left edge
-    if (appConfig.showNavigationMenu) {
-        self.sidebarEnabled = YES;
+    // recognize swipe from left edge (nav2 toggles sidebarEnabled per resolved instance)
+    if (MCKMPMutableConfig.shared.instance.showNavigationMenu || MCKMPMutableConfig.shared.instance.isNativeNavigationV2) {
+        // D1: under nav2, stay disabled until the first applyNav2ForUrl: resolves an
+        // active sidebar — an early edge-swipe would show the stale V1 menu otherwise
+        self.sidebarEnabled = !MCKMPMutableConfig.shared.instance.isNativeNavigationV2;
         UIScreenEdgePanGestureRecognizer *r = [[UIScreenEdgePanGestureRecognizer alloc] initWithTarget:self action:@selector(panGestureRecognized:)];
         if ([UIView userInterfaceLayoutDirectionForSemanticContentAttribute:self.view.semanticContentAttribute] == UIUserInterfaceLayoutDirectionRightToLeft) {
             r.edges = UIRectEdgeRight;
@@ -40,10 +42,8 @@
 
 -(void)viewDidLayoutSubviews
 {
-    GoNativeAppConfig *appConfig = [GoNativeAppConfig sharedAppConfig];
-    
     // theme and colors
-    if ([appConfig.iosTheme isEqualToString:@"dark"]) {
+    if ([MCKMPMutableConfig.shared.instance.configRoot.styling.iosTheme isEqualToString:@"dark"]) {
         self.navigationBar.barStyle = UIBarStyleBlack;
         self.view.backgroundColor = [UIColor blackColor];
     } else {
@@ -59,14 +59,14 @@
             self.view.backgroundColor = [UIColor whiteColor];
         }
     }
-
+    
     UIColor *titleColor = [UIColor colorNamed:@"titleColor"];
     UIColor *navBarTintColor = [UIColor colorNamed:@"navigationBarTintColor"];
     NSDictionary *titleTextAttributes = @{NSForegroundColorAttributeName: titleColor};
     self.navigationBar.titleTextAttributes = titleTextAttributes;
     self.navigationBar.barTintColor = navBarTintColor;
-    
-    if (@available(iOS 13.0, *)) {
+
+    if (![LEANUtilities isGlassDesignEnabled] || !MCKMPMutableConfig.shared.instance.configRoot.styling.iosTransparentNavBar) {
         UINavigationBarAppearance *appearance = [[UINavigationBarAppearance alloc] init];
         [appearance configureWithOpaqueBackground];
         [appearance setBackgroundColor:navBarTintColor];
@@ -91,7 +91,7 @@
 #pragma mark - UINavigationControllerDelegate
 - (void)navigationController:(UINavigationController *)navigationController didShowViewController:(UIViewController *)viewController animated:(BOOL)animated
 {
-    if ([viewController isKindOfClass:[LEANWebViewController class]] && [GoNativeAppConfig sharedAppConfig].showToolbar) {
+    if ([viewController isKindOfClass:[LEANWebViewController class]] && MCKMPMutableConfig.shared.instance.configRoot.styling.showToolbar) {
         [navigationController setToolbarHidden:NO animated:YES];
     }
     else {
@@ -103,9 +103,18 @@
 
 #pragma mark - Gesture recognizer
 
+- (UIViewController *)rootWebViewController
+{
+    for (UIViewController *vc in self.viewControllers) {
+        if ([vc isKindOfClass:[LEANWebViewController class]]) return vc;
+    }
+    return nil;
+}
+
 - (void)panGestureRecognized:(UIScreenEdgePanGestureRecognizer *)sender
 {
-    if (self.sidebarEnabled) {
+    // the sidebar belongs to the root screen; pushed screens swipe back instead
+    if (self.sidebarEnabled && self.topViewController == [self rootWebViewController]) {
         [self.frostedViewController panGestureRecognized:sender];
     }
 }

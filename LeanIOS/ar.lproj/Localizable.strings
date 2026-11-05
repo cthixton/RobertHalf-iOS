@@ -2,10 +2,28 @@
 "button-cancel" = "إلغاء";
 
 /* iOS Button: OK */
-"button-ok" = "حسناً";
+"button-ok" = "موافق";
 
 /* iOS Button: View */
 "button-view" = "عرض";
 
 /* iOS Button: Menu */
 "button-menu" = "القائمة";
+
+/* Button: Done */
+"button-done" = "تم";
+
+/* Button: Copy Link */
+"button-copy-link" = "نسخ الرابط";
+
+/* Button: Open External */
+"button-open-external" = "فتح الرابط في متصفح خارجي";
+
+/* Button: Share External */
+"button-share-link" = "مشاركة الرابط";
+
+/* Button: Back */
+"button-back" = "رجوع";
+
+/* Button: Forward */
+"button-forward" = "إلى الأمام";

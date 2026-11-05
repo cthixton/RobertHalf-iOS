@@ -2,10 +2,28 @@
 "button-cancel" = "Cancelar";
 
 /* Button: OK */
-"button-ok" = "Aceitar";
+"button-ok" = "OK";
 
 /* Button: View */
-"button-view" = "Assistir";
+"button-view" = "Ver";
 
 /* Button: Menu */
 "button-menu" = "Menu";
+
+/* Button: Done */
+"button-done" = "Concluído";
+
+/* Button: Copy Link */
+"button-copy-link" = "Copiar endereço do link";
+
+/* Button: Open External */
+"button-open-external" = "Abrir link no navegador externo";
+
+/* Button: Share External */
+"button-share-link" = "Compartilhar link";
+
+/* Button: Back */
+"button-back" = "Voltar";
+
+/* Button: Forward */
+"button-forward" = "Avançar";

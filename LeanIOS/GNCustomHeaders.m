@@ -7,6 +7,7 @@
 //
 
 #import "GNCustomHeaders.h"
+@import MedianCoreKMP;
 
 static NSString * kOurRequestProperty = @"co.median.ios.GNCustomHeaders";
 
@@ -18,7 +19,7 @@ static NSString * kOurRequestProperty = @"co.median.ios.GNCustomHeaders";
 @implementation GNCustomHeaders
 +(NSDictionary*)getCustomHeaders
 {
-    NSDictionary *config = [GoNativeAppConfig sharedAppConfig].customHeaders;
+    NSDictionary *config = [MCKMPMutableConfig.shared.instance.configRoot.general effectiveCustomHeaders];
     if (!config) {
         return nil;
     }

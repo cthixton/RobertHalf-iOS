@@ -21,3 +21,9 @@
 
 /* Button: Share External */
 "button-share-link" = "Share link";
+
+/* Button: Back */
+"button-back" = "Back";
+
+/* Button: Forward */
+"button-forward" = "Forward";

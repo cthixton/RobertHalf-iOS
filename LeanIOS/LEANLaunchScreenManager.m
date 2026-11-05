@@ -9,10 +9,9 @@
 #import "LEANLaunchScreenManager.h"
 #import "LEANAppDelegate.h"
 #import "GonativeIO-Swift.h"
-@import GoNativeCore;
+@import MedianCoreKMP;
 
 @interface LEANLaunchScreenManager()
-@property id<GNController> controller;
 @property UIImageView *launchScreen;
 @property BOOL isShown;
 @end
@@ -36,10 +35,9 @@
     
     self.isShown = YES;
     
-    self.controller = [((LEANAppDelegate *)[UIApplication sharedApplication].delegate).bridge getControllerForKey:@"splashScreen" runner:(id)vc];
-    
-    if (self.controller) {
-        [self.controller triggerEvent:@"showSplashScreen"];
+    // a plugin (e.g. Lottie animated splash) may own the splash screen via EventBus
+    if ([MCKMPEventBus.shared hasSubscribersEvent:@"showSplashScreen"]) {
+        [MCKMPEventBus.shared emitEvent:@"showSplashScreen"];
         return;
     }
     
@@ -73,8 +71,8 @@
 }
 
 - (void)hide {
-    if (self.controller) {
-        [self.controller triggerEvent:@"hideSplashScreen"];
+    if ([MCKMPEventBus.shared hasSubscribersEvent:@"hideSplashScreen"]) {
+        [MCKMPEventBus.shared emitEvent:@"hideSplashScreen"];
         return;
     }
     

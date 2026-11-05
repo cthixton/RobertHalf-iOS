@@ -7,7 +7,7 @@
 //
 
 #import "MedianEventsManager.h"
-@import GoNativeCore;
+@import MedianCoreKMP;
 
 @interface MedianEventsManager()
 @property (weak, nonatomic) LEANWebViewController *wvc;
@@ -28,7 +28,7 @@
 }
 
 - (void)triggerEvent:(NSString *)eventName data:(NSDictionary *)data {
-    if ([GoNativeAppConfig sharedAppConfig].injectMedianJS || !eventName) {
+    if (MCKMPMutableConfig.shared.instance.configRoot.general.injectMedianJS || !eventName) {
         return;
     }
     
@@ -38,11 +38,15 @@
     }
     
     self.queue[eventName] = self.queue[eventName] ?: [NSMutableArray array];
-    [self.queue[eventName] addObject:data ?: @{}];
+    
+    NSDictionary *item = data ?: @{};
+    if (![self.queue[eventName] containsObject:item]) {
+        [self.queue[eventName] addObject:item];
+    }
 }
 
 - (void)subscribeEvent:(NSString *)eventName {
-    if ([GoNativeAppConfig sharedAppConfig].injectMedianJS || !eventName) {
+    if (MCKMPMutableConfig.shared.instance.configRoot.general.injectMedianJS || !eventName) {
         return;
     }
     
@@ -58,7 +62,7 @@
 }
 
 - (void)unsubscribeEvent:(NSString *)eventName {
-    if ([GoNativeAppConfig sharedAppConfig].injectMedianJS || !eventName) {
+    if (MCKMPMutableConfig.shared.instance.configRoot.general.injectMedianJS || !eventName) {
         return;
     }
     
@@ -67,6 +71,10 @@
 
 - (BOOL)isSubscribedForEvent:(NSString *)eventName {
     return self.subscriptions[eventName];
+}
+
+- (void)clearSubscriptions {
+    [self.subscriptions removeAllObjects];
 }
 
 @end

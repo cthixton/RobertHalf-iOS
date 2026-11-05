@@ -7,6 +7,7 @@
 //
 
 #import "LEANUrlInspector.h"
+@import MedianCoreKMP;
 
 @interface LEANUrlInspector ()
 @property NSRegularExpression *userIdRegex;
@@ -32,8 +33,9 @@
 - (void)setup
 {
     self.userId = @"";
-    if ([GoNativeAppConfig sharedAppConfig].userIdRegex) {
-        self.userIdRegex = [NSRegularExpression regularExpressionWithPattern:[GoNativeAppConfig sharedAppConfig].userIdRegex options:0 error:nil];
+    NSString *userIdRegex = MCKMPMutableConfig.shared.instance.configRoot.navigation.sidebarNavigation.userIdRegex;
+    if (userIdRegex) {
+        self.userIdRegex = [NSRegularExpression regularExpressionWithPattern:userIdRegex options:0 error:nil];
     } else {
         self.userIdRegex = nil;
     }

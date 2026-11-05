@@ -11,6 +11,8 @@
 #import "GonativeIO-Swift.h"
 #import "LEANUtilities.h"
 #import "LEANPDFManager.h"
+#import "LEANUserAgentManager.h"
+@import MedianCoreKMP;
 
 @interface LEANDocumentSharer ()
 @property UIDocumentInteractionController *interactionController;
@@ -207,14 +209,14 @@
     NSMutableURLRequest *req = [NSMutableURLRequest requestWithURL:url];
     
     // Add user-agent
-    NSString *userAgent = [[GoNativeAppConfig sharedAppConfig] userAgentForUrl:url];
+    NSString *userAgent = [MCKMPMutableConfig.shared.instance.configRoot.general userAgentForUrlUrl:url.absoluteString ?: @""] ?: LEANUserAgentManager.sharedManager.userAgent;
     if (userAgent) {
         [req setValue:userAgent forHTTPHeaderField:@"User-Agent"];
     }
     
     // If using WKWebView on iOS11+, get cookies from WKHTTPCookieStore
     BOOL gettingWKWebviewCookies = NO;
-    if ([GoNativeAppConfig sharedAppConfig].useWKWebView) {
+    if (MCKMPMutableConfig.shared.instance.configRoot.general.useWKWebView) {
         if (@available(iOS 11.0, *)) {
             gettingWKWebviewCookies = YES;
             WKHTTPCookieStore *cookieStore = [WKWebsiteDataStore defaultDataStore].httpCookieStore;

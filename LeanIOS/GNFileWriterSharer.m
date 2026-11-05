@@ -187,7 +187,7 @@
     [fileInfo.fileHandle closeFile];
     
     NSString *error = message[@"error"];
-    if ([error isKindOfClass:[NSString class]] && error.length > 0 && fileInfo.callback) {
+    if ([error isKindOfClass:[NSString class]] && error.length > 0) {
         [self completeDownload:identifier data:@{ @"success": @NO, @"error": error }];
         return;
     }

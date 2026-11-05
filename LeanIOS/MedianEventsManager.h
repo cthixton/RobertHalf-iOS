@@ -16,6 +16,8 @@ NS_ASSUME_NONNULL_BEGIN
 - (void)subscribeEvent:(NSString *)eventName;
 - (void)unsubscribeEvent:(NSString *)eventName;
 - (BOOL)isSubscribedForEvent:(NSString *)eventName;
+// call when a new document commits; queued events are kept for the incoming page
+- (void)clearSubscriptions;
 @end
 
 NS_ASSUME_NONNULL_END

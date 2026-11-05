@@ -7,7 +7,9 @@
 //
 
 #import "LEANActionManager.h"
+#import "LEANUtilities.h"
 #import "GonativeIO-Swift.h"
+@import MedianCoreKMP;
 
 @implementation LEANActionButtons
 
@@ -30,6 +32,7 @@
 @property NSMutableArray *actionsData;
 @property (readwrite, assign) NSString *currentSearchTemplateUrl;
 @property CustomMenu *menuView;
+@property MCKMPTopNavComponent *nav2TopNav;
 @end
 
 @implementation LEANActionManager
@@ -47,15 +50,21 @@
     if (!url) {
         return;
     }
-    
-    GoNativeAppConfig *appConfig = [GoNativeAppConfig sharedAppConfig];
+    if (MCKMPMutableConfig.shared.instance.isNativeNavigationV2) {
+        // nav2: buttons come from the resolved instance via loadNav2TopNav:
+        return;
+    }
+
     NSString *urlString = [url absoluteString];
-    
-    for (NSUInteger i = 0; i < appConfig.actionSelection.count; i++) {
-        ActionSelection *actionSelection = appConfig.actionSelection[i];
+
+    MCKMPActionConfig *actionConfig = MCKMPMutableConfig.shared.instance.configRoot.navigation.actionConfig;
+    NSArray<MCKMPActionSelectionRule *> *selectionRules = actionConfig.active ? actionConfig.actionSelection : @[];
+    for (NSUInteger i = 0; i < selectionRules.count; i++) {
+        MCKMPActionSelectionRule *actionSelection = selectionRules[i];
         @try {
-            if ([actionSelection.regex evaluateWithObject:urlString]) {
-                [self setMenuID:actionSelection.identifier];
+            NSPredicate *predicate = [NSPredicate predicateWithFormat:@"SELF MATCHES %@", actionSelection.regex];
+            if ([predicate evaluateWithObject:urlString]) {
+                [self setMenuID:actionSelection.id];
                 return;
             }
         }
@@ -76,25 +85,57 @@
     [self.wvc updateNavigationBarItemsAnimated:YES];
 }
 
+// nav2: store the resolved top bar component and refresh the buttons
+- (void)loadNav2TopNav:(MCKMPTopNavComponent *)topNav {
+    self.nav2TopNav = topNav;
+    [self.wvc updateNavigationBarItemsAnimated:YES];
+}
+
 - (LEANActionButtons *)configureNavBarButtonsAllowingLeftAction:(BOOL)allowLeftAction {
+    if (MCKMPMutableConfig.shared.instance.isNativeNavigationV2) {
+        // nav2: MenuBarItems from the resolved instance; allowLeftMenu puts the first
+        // item in the left slot when neither the hamburger nor a back button is there
+        NSMutableArray *entries = [NSMutableArray array];
+        if (self.nav2TopNav && self.nav2TopNav.active) {
+            for (MCKMPMenuBarItem *item in self.nav2TopNav.items) {
+                NSMutableDictionary *entry = [NSMutableDictionary dictionary];
+                entry[@"label"] = item.label;
+                if (item.url) entry[@"url"] = item.url;
+                if (item.icon) entry[@"icon"] = item.icon;
+                if (item.system) entry[@"system"] = item.system;
+                [entries addObject:entry];
+            }
+        }
+        return [self buildButtonsFromActions:entries allowLeftAction:allowLeftAction allowLeftMenu:self.nav2TopNav.allowLeftMenu];
+    }
+
     if (!self.currentMenuID) {
         self.items = nil;
         self.currentSearchTemplateUrl = nil;
         return [[LEANActionButtons alloc] initWithLeftItems:@[] rightItems:@[]];
     }
-    
+
+    MCKMPActionMenu *actionGroup = nil;
+    for (MCKMPActionMenu *menuEntry in MCKMPMutableConfig.shared.instance.configRoot.navigation.actionConfig.actions) {
+        if ([menuEntry.id isEqualToString:self.currentMenuID]) {
+            actionGroup = menuEntry;
+            break;
+        }
+    }
+    NSData *actionItemsData = actionGroup ? [[actionGroup itemsJson] dataUsingEncoding:NSUTF8StringEncoding] : nil;
+    NSArray *actions = actionItemsData ? [NSJSONSerialization JSONObjectWithData:actionItemsData options:0 error:nil] : nil;
+    return [self buildButtonsFromActions:actions allowLeftAction:allowLeftAction allowLeftMenu:actionGroup.allowLeftMenu];
+}
+
+- (LEANActionButtons *)buildButtonsFromActions:(NSArray *)actions allowLeftAction:(BOOL)allowLeftAction allowLeftMenu:(BOOL)allowLeftMenu {
     self.items = [NSMutableArray array];
     self.buttons = [NSMutableArray array];
     self.actionsData = [NSMutableArray array];
-    
-    NSDictionary *actionGroup = [GoNativeAppConfig sharedAppConfig].actions[self.currentMenuID];
-    if (![actionGroup isKindOfClass:[NSDictionary class]] || ![actionGroup[@"items"] isKindOfClass:[NSArray class]]) {
+
+    if (![actions isKindOfClass:[NSArray class]]) {
         return [[LEANActionButtons alloc] initWithLeftItems:@[] rightItems:@[]];
     }
-    
-    NSArray *actions = actionGroup[@"items"];
-    BOOL allowLeftMenu = [actionGroup[@"allowLeftMenu"] boolValue];
-    
+
     NSUInteger maxVisibleItems = 1;
     if (UIDevice.currentDevice.userInterfaceIdiom == UIUserInterfaceIdiomPad) {
         maxVisibleItems = 4;
@@ -107,7 +148,7 @@
     if (actions.count > maxVisibleItems + 1) {
         NSMutableArray *visibleItems = [NSMutableArray arrayWithArray:[actions subarrayWithRange:NSMakeRange(0, maxVisibleItems)]];
         [visibleItems addObject: @{
-            @"label": @"Menu",
+            @"label": NSLocalizedString(@"button-menu", nil),
             @"icon": @"md mi-more-vert",
             @"submenu": [actions subarrayWithRange:NSMakeRange(maxVisibleItems, actions.count - maxVisibleItems)]
         }];
@@ -193,7 +234,7 @@
 }
 
 - (CGFloat)sizeForIcon:(NSString *)iconName {
-    CGFloat size = 22;
+    CGFloat size = [LEANUtilities isGlassDesignEnabled] ? 18 : 20;
     if ([iconName hasPrefix:@"custom "]) {
         size = size * 1.05;
     } else if ([iconName hasPrefix:@"md "]) {

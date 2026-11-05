@@ -7,19 +7,20 @@
 //
 
 import Foundation
-import GoNativeCore
+import MedianCore
 
 @objc class WindowsController: NSObject {
     @objc class public func windowCountChanged() {
-        let appConfig = GoNativeAppConfig.shared()!
-        guard LEANWebViewController.currentWindows > appConfig.maxWindows else {
+        guard let maxWindows = MutableConfig.shared.instance.maxWindows, maxWindows.enabled else { return }
+        let numWindows = Int(maxWindows.numWindows)
+        guard LEANWebViewController.currentWindows > numWindows else {
             return
         }
         
         if let rootViewController = UIApplication.shared.windows.first?.rootViewController as? LEANRootViewController,
            let navigationController = rootViewController.contentViewController as? UINavigationController {
             var viewControllers = navigationController.viewControllers
-            let removeTillIndex = LEANWebViewController.currentWindows - appConfig.maxWindows
+            let removeTillIndex = LEANWebViewController.currentWindows - numWindows
             viewControllers.removeSubrange(1...removeTillIndex)
             navigationController.viewControllers = viewControllers
         }

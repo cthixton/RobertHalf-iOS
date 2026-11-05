@@ -10,10 +10,19 @@
 #import "LEANWebViewController.h"
 #import "LEANUtilities.h"
 #import "GonativeIO-Swift.h"
+@import MedianCoreKMP;
+
+// Local replacement for GoNativeCore's RegexEnabled
+@interface LEANRegexEnabled : NSObject
+@property NSPredicate *regex;
+@property BOOL enabled;
+@end
+@implementation LEANRegexEnabled
+@end
 
 @interface LEANToolbarItem : NSObject
 @property BOOL enabled;
-@property NSArray<RegexEnabled *> *regexes;
+@property NSArray<LEANRegexEnabled *> *regexes;
 @property NSString *visibility;
 @property UIBarButtonItem *item;
 @end
@@ -27,23 +36,29 @@
 @property LEANToolbarItem *backButton;
 @property LEANToolbarItem *refreshButton;
 @property LEANToolbarItem *forwardButton;
+@property MCKMPToolbarComponent *nav2Component;
+@property BOOL nav2ToolbarNeedsBack;
 @end
 
 @implementation LEANToolbarManager
 
-- (instancetype)initWithToolbar:(UIToolbar*)toolbar webviewController:(LEANWebViewController*)wvc
-{
+- (instancetype)initWithToolbar:(UIToolbar*)toolbar heightConstraint:(NSLayoutConstraint *)heightConstraint wvc:(LEANWebViewController*)wvc {
     self = [super init];
     if (self) {
         self.toolbar = toolbar;
+        
+        if ([LEANUtilities isGlassDesignEnabled]) {
+            heightConstraint.constant = 60;
+        }
+        
         self.wvc = wvc;
         [self processConfig];
+
     }
     return self;
 }
 
-- (void)processConfig
-{
+- (void)processConfig {
     NSMutableArray *toolbarItems = [NSMutableArray array];
     
     // initialize buttons
@@ -51,16 +66,23 @@
     self.forwardButton = [[LEANToolbarItem alloc] init];
     self.refreshButton = [[LEANToolbarItem alloc] init];
     
-    self.backButton.item = [self createButtonWithTitle:@"Back" forButton:@"Back" andIcon:@"fas fa-chevron-left"];
+    NSString *defaultBackButtonText = NSLocalizedString(@"button-back", nil);
+    NSString *defaultForwardButtonText = NSLocalizedString(@"button-forward", nil);
+    
+    self.backButton.item = [self createButtonWithTitle:defaultBackButtonText forButton:@"Back" andIcon:@"fas fa-chevron-left"];
     self.refreshButton.item = [self createButtonWithTitle:nil forButton:@"Refresh" andIcon:@"fas fa-redo-alt"];
-    self.forwardButton.item = [self createButtonWithTitle:@"Forward" forButton:@"Forward" andIcon:@"fas fa-chevron-right"];
+    self.forwardButton.item = [self createButtonWithTitle:defaultForwardButtonText forButton:@"Forward" andIcon:@"fas fa-chevron-right"];
+    
     self.backButton.enabled = NO;
     self.refreshButton.enabled = NO;
     self.forwardButton.enabled = NO;
     
     // loop through items from appConfig
-    if ([GoNativeAppConfig sharedAppConfig].toolbarItems) {
-        for (NSDictionary *entry in [GoNativeAppConfig sharedAppConfig].toolbarItems) {
+    MCKMPToolbarNavigationConfig *toolbarNav = MCKMPMutableConfig.shared.instance.configRoot.navigation.toolbarNavigation;
+    NSData *itemsData = [[toolbarNav itemsJson] dataUsingEncoding:NSUTF8StringEncoding];
+    NSArray *toolbarConfigItems = itemsData ? [NSJSONSerialization JSONObjectWithData:itemsData options:0 error:nil] : nil;
+    if ([toolbarConfigItems isKindOfClass:[NSArray class]]) {
+        for (NSDictionary *entry in toolbarConfigItems) {
             if (![entry isKindOfClass:[NSDictionary class]]) continue;
             
             NSString *system = entry[@"system"];
@@ -71,7 +93,7 @@
             }
 
             if ([system isEqualToString:@"back"]) {
-                NSString *title = [self getLabelUsingEntry:entry defaultLabel:@"Back"];
+                NSString *title = [self getLabelUsingEntry:entry defaultLabel:defaultBackButtonText];
                 self.backButton.item = [self createButtonWithTitle:title forButton:@"Back" andIcon:@"fas fa-chevron-left"];
                 self.backButton.enabled = YES;
                 self.backButton.regexes = [self getRegexesFromQuery:entry[@"urlRegex"]];
@@ -83,7 +105,7 @@
                 self.refreshButton.visibility = visibility;
             }
             else if ([system isEqualToString:@"forward"]){
-                NSString *title = [self getLabelUsingEntry:entry defaultLabel:@"Forward"];
+                NSString *title = [self getLabelUsingEntry:entry defaultLabel:defaultForwardButtonText];
                 self.forwardButton.item = [self createButtonWithTitle:title forButton:@"Forward" andIcon:@"fas fa-chevron-right"];
                 self.forwardButton.enabled = enabled;
                 self.forwardButton.regexes = [self getRegexesFromQuery:entry[@"urlRegex"]];
@@ -92,39 +114,55 @@
         }
     }
     
-    // create toolbar
     UIBarButtonItem *space = [[UIBarButtonItem alloc] initWithBarButtonSystemItem:UIBarButtonSystemItemFlexibleSpace target:nil action:nil];
+    UIBarButtonItem *fixed = [[UIBarButtonItem alloc] initWithBarButtonSystemItem:UIBarButtonSystemItemFixedSpace target:nil action:nil];
     toolbarItems = [NSMutableArray arrayWithObjects:self.backButton.item, space, self.refreshButton.item, space, self.forwardButton.item, nil];
+    
+    if ([LEANUtilities isGlassDesignEnabled]) {
+        if (!self.refreshButton.enabled) {
+            [toolbarItems replaceObjectAtIndex:2 withObject:fixed];
+        }
+        
+        if (!self.forwardButton.enabled) {
+            [toolbarItems replaceObjectAtIndex:4 withObject:fixed];
+        }
+    }
     
     [self.toolbar setItems:toolbarItems animated:YES];
 }
 
 - (UIBarButtonItem *)createButtonWithTitle:(NSString *)title forButton:(NSString *)buttonType andIcon:(NSString *)icon {
-    UIButton *button = [UIButton buttonWithType:UIButtonTypeSystem];
+    CGFloat imageSize = [LEANUtilities isGlassDesignEnabled] ? 20 : 24;
+    UIImage *image = [LEANIcons imageForIconIdentifier:icon size:imageSize color:[UIColor colorNamed:@"tintColor"]];
     
-    // title
-    if(title) {
+    UIButton *button = [UIButton buttonWithType:UIButtonTypeSystem];
+    [button setImage:image forState:UIControlStateNormal];
+    
+    SEL action = @selector(refreshPressed:);
+    if ([buttonType isEqualToString:@"Back"]) {
+        action = @selector(backPressed:);
+    } else if ([buttonType isEqualToString:@"Forward"]) {
+        action = @selector(forwardPressed:);
+        [button setSemanticContentAttribute:UISemanticContentAttributeForceRightToLeft];
+    }
+    
+    [button addTarget:self action:action forControlEvents:UIControlEventTouchUpInside];
+    
+    if ([LEANUtilities isGlassDesignEnabled]) {
+        UIBarButtonItem *item = [[UIBarButtonItem alloc] initWithImage:image style:UIBarButtonItemStylePlain target:self action:action];
+        return item;
+    }
+    
+    if (title) {
         [button setTitle:title forState:UIControlStateNormal];
         [[button titleLabel] setFont:[UIFont systemFontOfSize:18]];
         [button setTitleColor:[UIColor colorNamed:@"tintColor"] forState:UIControlStateNormal];
-    }
-    
-    // image
-    [button setImage:[LEANIcons imageForIconIdentifier:icon size:24 color:[UIColor colorNamed:@"tintColor"]] forState:UIControlStateNormal];
-    
-    // action
-    if ([buttonType isEqualToString:@"Back"]) {
-        [button addTarget:self action:@selector(backPressed:) forControlEvents:UIControlEventTouchUpInside];
-    } else if ([buttonType isEqualToString:@"Forward"]) {
-        [button setSemanticContentAttribute:UISemanticContentAttributeForceRightToLeft];
-        [button addTarget:self action:@selector(forwardPressed:) forControlEvents:UIControlEventTouchUpInside];
-    } else {
-        [button addTarget:self action:@selector(refreshPressed:) forControlEvents:UIControlEventTouchUpInside];
+        button.titleLabel.adjustsFontSizeToFitWidth = YES;
+        button.titleLabel.minimumScaleFactor = 0.7;
     }
     
     button.alpha = 0;
     button.enabled = NO;
-    button.frame = CGRectMake(0, 0, button.intrinsicContentSize.width + 2, 44);
     
     return [[UIBarButtonItem alloc] initWithCustomView:button];
 }
@@ -172,7 +210,7 @@
             if ([entry[@"regex"] isKindOfClass:[NSString class]] &&
                 [entry[@"enabled"] isKindOfClass:[NSNumber class]]) {
                 
-                RegexEnabled *item = [[RegexEnabled alloc] init];
+                LEANRegexEnabled *item = [[LEANRegexEnabled alloc] init];
                 item.regex = [NSPredicate predicateWithFormat:@"SELF MATCHES %@", entry[@"regex"]];
                 item.enabled = [entry[@"enabled"] boolValue];
                 [regexes addObject:item];
@@ -182,10 +220,99 @@
     return regexes;
 }
 
+// nav2: ToolbarItems (system back/forward/refresh) from the resolved instance. The buttons are
+// applied even when the instance's toolbar is off, so the JavaScript bridge shows its own buttons.
+- (void)didLoadNav2Url:(NSURL *)url component:(MCKMPToolbarComponent *)component
+{
+    [self applyNav2Component:component];
+    if (!component || !component.active) {
+        [self.wvc hideToolbarAnimated:YES];
+        return;
+    }
+    [self updateToolbarButtonsRequiringBack:self.nav2ToolbarNeedsBack];
+}
+
+- (void)applyNav2Component:(MCKMPToolbarComponent *)component {
+    if ([self.nav2Component isEqual:component]) return;
+    self.nav2Component = component;
+
+    self.backButton.enabled = NO;
+    self.refreshButton.enabled = NO;
+    self.forwardButton.enabled = NO;
+    self.backButton.regexes = nil;
+    self.refreshButton.regexes = nil;
+    self.forwardButton.regexes = nil;
+    self.backButton.visibility = nil;
+    self.refreshButton.visibility = nil;
+    self.forwardButton.visibility = nil;
+
+    // Every button starts hidden and the instance's items switch them on: back is always shown,
+    // forward and refresh only when switched on. The back button's visibility applies to the
+    // whole toolbar: unless it is "always", a page load shows the toolbar only when the user can
+    // go back.
+    self.backButton.item = [self createButtonWithTitle:NSLocalizedString(@"button-back", nil) forButton:@"Back" andIcon:@"fas fa-chevron-left"];
+    self.refreshButton.item = [self createButtonWithTitle:nil forButton:@"Refresh" andIcon:@"fas fa-redo-alt"];
+    self.forwardButton.item = [self createButtonWithTitle:NSLocalizedString(@"button-forward", nil) forButton:@"Forward" andIcon:@"fas fa-chevron-right"];
+    self.nav2ToolbarNeedsBack = YES;
+    for (MCKMPToolbarItem *item in component.items) {
+        if ([item.system isEqualToString:@"back"]) {
+            self.backButton.item = [self createButtonWithTitle:[self nav2TitleForItem:item defaultLabel:NSLocalizedString(@"button-back", nil)] forButton:@"Back" andIcon:@"fas fa-chevron-left"];
+            self.backButton.enabled = YES;
+            self.nav2ToolbarNeedsBack = ![item.visibility isEqualToString:@"always"];
+        }
+        else if ([item.system isEqualToString:@"refresh"]) {
+            self.refreshButton.enabled = item.enabled;
+        }
+        else if ([item.system isEqualToString:@"forward"]) {
+            self.forwardButton.item = [self createButtonWithTitle:[self nav2TitleForItem:item defaultLabel:NSLocalizedString(@"button-forward", nil)] forButton:@"Forward" andIcon:@"fas fa-chevron-right"];
+            self.forwardButton.enabled = item.enabled;
+        }
+    }
+
+    UIBarButtonItem *space = [[UIBarButtonItem alloc] initWithBarButtonSystemItem:UIBarButtonSystemItemFlexibleSpace target:nil action:nil];
+    UIBarButtonItem *fixed = [[UIBarButtonItem alloc] initWithBarButtonSystemItem:UIBarButtonSystemItemFixedSpace target:nil action:nil];
+    NSMutableArray *toolbarItems = [NSMutableArray arrayWithObjects:self.backButton.item, space, self.refreshButton.item, space, self.forwardButton.item, nil];
+
+    if ([LEANUtilities isGlassDesignEnabled]) {
+        if (!self.backButton.enabled) {
+            [toolbarItems replaceObjectAtIndex:0 withObject:fixed];
+        }
+        if (!self.refreshButton.enabled) {
+            [toolbarItems replaceObjectAtIndex:2 withObject:fixed];
+        }
+        if (!self.forwardButton.enabled) {
+            [toolbarItems replaceObjectAtIndex:4 withObject:fixed];
+        }
+    }
+
+    [self.toolbar setItems:toolbarItems animated:YES];
+}
+
+- (NSString *)nav2TitleForItem:(MCKMPToolbarItem *)item defaultLabel:(NSString *)defaultLabel {
+    if ([item.titleType isEqualToString:@"customText"]) {
+        return item.title ?: @"";
+    }
+    if ([item.titleType isEqualToString:@"defaultText"]) {
+        return defaultLabel;
+    }
+    return @""; // "noText" (default)
+}
+
 - (void)didLoadUrl:(NSURL*)url
 {
-    GoNativeAppConfig *appConfig = [GoNativeAppConfig sharedAppConfig];
-    if (!appConfig.toolbarEnabled) {
+    if (MCKMPMutableConfig.shared.instance.isNativeNavigationV2) {
+        // canGoBack/canGoForward KVO path; the component was applied by didLoadNav2Url
+        if (self.nav2Component && self.nav2Component.active) {
+            [self updateToolbarButtonsRequiringBack:self.nav2ToolbarNeedsBack];
+        } else {
+            [self.wvc hideToolbarAnimated:YES];
+        }
+        return;
+    }
+
+    MCKMPToolbarNavigationConfig *toolbarNav = MCKMPMutableConfig.shared.instance.configRoot.navigation.toolbarNavigation;
+    BOOL toolbarEnabled = toolbarNav ? toolbarNav.enabled : YES;
+    if (!toolbarEnabled) {
         BOOL toolbarVisible = [self tryToShowBackButton:url];
         if (toolbarVisible) {
             [self.wvc showToolbarAnimated:YES];
@@ -209,8 +336,15 @@
     
     // Check visibilityByPages
     // if specific pages only
-    if (appConfig.toolbarVisibilityByPages == LEANToolbarVisibilityByPagesSpecific) {
-        visibilityByPages = [self evaluateUrlString:urlString usingRegexes:appConfig.toolbarRegexes];
+    if ([toolbarNav.visibilityByPages isEqualToString:@"specificPages"]) {
+        NSMutableArray *pageRegexes = [NSMutableArray array];
+        for (MCKMPToolbarRegexRule *rule in toolbarNav.regexes) {
+            LEANRegexEnabled *item = [[LEANRegexEnabled alloc] init];
+            item.regex = [NSPredicate predicateWithFormat:@"SELF MATCHES %@", rule.regex];
+            item.enabled = rule.enabled;
+            [pageRegexes addObject:item];
+        }
+        visibilityByPages = [self evaluateUrlString:urlString usingRegexes:pageRegexes];
     }
     
     // Update back button
@@ -221,7 +355,7 @@
     
     // Check visibilityByBackButton
     // if back button active only
-    if (appConfig.toolbarVisibilityByBackButton == LEANToolbarVisibilityByBackButtonActive) {
+    if (![toolbarNav.visibilityByBackButton isEqualToString:@"always"]) {
         visibilityByBackButton = backEnabled;
     }
     
@@ -246,7 +380,7 @@
 - (BOOL)tryToShowBackButton:(NSURL *)url {
     if (![self canGoBack]) return NO;
     
-    if ([self.urlMimeType isEqualToString:@"application/pdf"] || [self.urlMimeType hasPrefix:@"image/"]) {
+    if ([self.urlMimeType hasPrefix:@"image/"]) {
         [self setToolbarItem:self.backButton enabled:YES];
         return YES;
     }
@@ -281,7 +415,7 @@
 }
 
 - (BOOL)evaluateUrlString:(NSString *)urlString usingRegexes:(NSArray *)regexes {
-    for (RegexEnabled *regexObject in regexes) {
+    for (LEANRegexEnabled *regexObject in regexes) {
         @try {
             BOOL matches = [regexObject.regex evaluateWithObject:urlString];
             if (matches) return regexObject.enabled;
@@ -294,6 +428,11 @@
 }
 
 - (void)updateToolbarButtons {
+    [self updateToolbarButtonsRequiringBack:NO];
+}
+
+// requireBack: show the toolbar only when the user can go back.
+- (void)updateToolbarButtonsRequiringBack:(BOOL)requireBack {
     BOOL backEnabled = NO;
     if (self.backButton.enabled) {
         backEnabled = [self canGoBack];
@@ -311,7 +450,7 @@
         [self setToolbarItem:self.refreshButton enabled:YES];
     }
     
-    if (backEnabled || forwardEnabled || refreshEnabled) {
+    if ((!requireBack || backEnabled) && (backEnabled || forwardEnabled || refreshEnabled)) {
         [self.wvc showToolbarAnimated:YES];
     } else {
         [self.wvc hideToolbarAnimated:YES];

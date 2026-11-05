@@ -8,6 +8,7 @@
 
 #import "LEANConfigUpdater.h"
 #import "LEANInstallation.h"
+@import MedianCoreKMP;
 
 @interface LEANConfigUpdater ()
 
@@ -17,7 +18,7 @@
 
 + (void)registerEvent:(NSString*)event data:(NSDictionary *)data
 {
-    if (!event || [GoNativeAppConfig sharedAppConfig].disableEventRecorder) {
+    if (!event || MCKMPMutableConfig.shared.instance.configRoot.general.disableEventRecorder) {
         return;
     }
     

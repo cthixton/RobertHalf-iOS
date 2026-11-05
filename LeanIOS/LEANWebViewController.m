@@ -12,6 +12,7 @@
 #import <AVFoundation/AVFoundation.h>
 
 #import "LEANWebViewController.h"
+#import "LEANWindowOverrideHandler.h"
 #import "LEANAppDelegate.h"
 #import "LEANUtilities.h"
 #import "LEANHeaders.h"
@@ -22,7 +23,6 @@
 #import "LEANJsCustomCodeExecutor.h"
 #import "NSURL+LEANUtilities.h"
 #import "LEANUrlInspector.h"
-#import "LEANProfilePicker.h"
 #import "LEANInstallation.h"
 #import "LEANLaunchScreenManager.h"
 #import "LEANKeyboardManager.h"
@@ -34,7 +34,6 @@
 #import "Reachability.h"
 #import "LEANActionManager.h"
 #import "LEANPDFManager.h"
-#import "GNRegistrationManager.h"
 #import "LEANRegexRulesManager.h"
 #import "MedianEventsManager.h"
 #import "LEANWebViewIntercept.h"
@@ -44,14 +43,20 @@
 #import "GNBackgroundAudio.h"
 #import "GonativeIO-Swift.h"
 #import <AppTrackingTransparency/ATTrackingManager.h>
-#import "GNJSBridgeInterface.h"
 #import "GNLogManager.h"
-@import GoNativeCore;
+#import "LEANNotifications.h"
+#import "LEANUserAgentManager.h"
+@import MedianCoreKMP;
 
 #define OFFLINE_URL @"http://offline/"
 #define LOCAL_FILE_URL @"http://localFile/"
 
-@interface LEANWebViewController () <UISearchBarDelegate, UIActionSheetDelegate, UIScrollViewDelegate, UITabBarDelegate, WKNavigationDelegate, WKUIDelegate, WKDownloadDelegate, MFMailComposeViewControllerDelegate, CLLocationManagerDelegate, GNJavascriptRunner>
+// Shorthand for the median-core config singleton.
+static MCKMPMutableConfigState* medianConfig(void) {
+    return MCKMPMutableConfig.shared.instance;
+}
+
+@interface LEANWebViewController () <UISearchBarDelegate, UIActionSheetDelegate, UIScrollViewDelegate, UITabBarDelegate, WKNavigationDelegate, WKUIDelegate, WKDownloadDelegate, MFMailComposeViewControllerDelegate, CLLocationManagerDelegate, MCKMPIOSAppHost, MCKMPCommandResponder, MCKMPWebViewBridgeGate>
 
 @property WKWebView *wkWebview;
 
@@ -65,7 +70,9 @@
 @property IBOutlet NSLayoutConstraint *toolbarBottomConstraint;
 @property (strong, nonatomic) IBOutlet NSLayoutConstraint *pluginViewTopWebviewBottomConstraint;
 @property (strong, nonatomic) IBOutlet NSLayoutConstraint *toolbarTopWebviewBottomConstraint;
+@property (strong, nonatomic) IBOutlet NSLayoutConstraint *toolbarHeightConstraint;
 @property (strong, nonatomic) IBOutlet NSLayoutConstraint *tabbarTopWebviewBottomConstraint;
+@property (strong, nonatomic) IBOutlet NSLayoutConstraint *tabbarHeightConstraint;
 @property (strong, nonatomic) IBOutlet NSLayoutConstraint *webviewLeftSafeAreaLeft;
 @property (strong, nonatomic) IBOutlet NSLayoutConstraint *webviewRightSafeAreaRight;
 @property (strong, nonatomic) IBOutlet NSLayoutConstraint *toolbarLeftSafeAreaLeft;
@@ -88,7 +95,6 @@
 @property NSURLRequest *currentRequest;
 @property NSInteger urlLevel; // -1 for unknown
 @property BOOL isWindowOpen;
-@property NSString *profilePickerJs;
 @property NSTimer *timer;
 @property BOOL startedLoading; // for transitions, keeps track of whether document.readystate has switched to "loading"
 @property BOOL didLoadPage; // keep track of whether any page has loaded. If network reconnects, then will attempt reload if there is no page loaded
@@ -99,10 +105,21 @@
 @property BOOL statusBarOverlay;
 @property CGFloat savedScreenBrightness;
 @property BOOL restoreBrightnessOnNavigation;
-@property BOOL sidebarItemsEnabled;
+@property BOOL hasAppliedNav2; // nav2 (A1): this controller has rendered a resolved state
+@property MCKMPTopNavComponent *lastAppliedTopNav; // nav2 (A1): top bar this controller last rendered
 
 @property NSString *postLoadJavascript;
 @property NSString *postLoadJavascriptForRefresh;
+
+// Auto show/hide top navbar
+@property CGFloat previousScrollY;
+@property BOOL isShowingTopNavBar;
+@property NSTimeInterval nextScrollTime;
+
+@property CGFloat lastNavBarBottomY;
+
+// Used to prevent race conditions when showing and hiding the tab bar and toolbar
+@property (nonatomic, strong) NSMapTable<UIView *, NSNumber *> *barVisibility;
 
 @property (nonatomic, copy) void (^locationPermissionBlock)(void);
 
@@ -116,22 +133,27 @@
 @property CLLocationManager *locationManager;
 @property GNFileWriterSharer *fileWriterSharer;
 @property NSString *connectivityCallback;
+@property NSString *keyboardListenerCallback;
 @property GNBackgroundAudio *backgroundAudio;
 @property GNConfigPreferences *configPreferences;
 @property LEANDocumentSharer *documentSharer;
-@property GNRegistrationManager *registrationManager;
 @property GNLogManager *logManager;
 @property GNCustomHeaders *customHeadersManager;
 @property LEANWindowsManager *windowsManager;
 @property LEANPDFManager *pdfManager;
 @property LEANLoadingSpinnerManager *loadingSpinnerManager;
+@property WebViewViewportManager *viewportManager;
 
 @property NSNumber* statusBarStyle; // set via native bridge, only works if no navigation bar
 @property IBOutlet NSLayoutConstraint *topGuideConstraint; // modify constant to place content under status bar
 
 @property IBOutlet UIView *pluginView;
-@property GNJSBridgeInterface *JSBridgeInterface;
 @property NSString *JSBridgeScript;
+@property BOOL isFullscreen;
+
+// median-core JS bridge (registers itself on JSBridge + medianBridge handler names)
+@property MCKMPWebViewBridge *medianBridge;
+@property MCKMPMessageRouter *messageRouter;
 
 @end
 
@@ -139,9 +161,21 @@
 
 static CGRect sharePopOverRect; // last touch coordinates in CGRect
 static NSInteger _currentWindows = 0;
+static NSNumber *_windowOpenHideNavbar = nil; // runtime override of navigation.iosWindowOpenHideNavbar
 
 + (NSInteger)currentWindows {
   return _currentWindows;
+}
+
++ (BOOL)windowOpenHideNavbar {
+    if (!_windowOpenHideNavbar) {
+        _windowOpenHideNavbar = @(medianConfig().configRoot.navigation.iosWindowOpenHideNavbar);
+    }
+    return _windowOpenHideNavbar.boolValue;
+}
+
++ (void)setWindowOpenHideNavbar:(BOOL)hide {
+    _windowOpenHideNavbar = @(hide);
 }
 
 + (void)setCurrentWindows:(NSInteger) currentWindows {
@@ -159,9 +193,11 @@ static NSInteger _currentWindows = 0;
     [self becomeFirstResponder];
     LEANWebViewController.currentWindows += 1;
     self.checkLoginSignup = YES;
-    
-    GoNativeAppConfig *appConfig = [GoNativeAppConfig sharedAppConfig];
-    
+
+    MCKMPMutableConfigState *config = medianConfig();
+
+    self.barVisibility = [NSMapTable weakToStrongObjectsMapTable];
+
     // enable touch listener only for iPads
     if(UIDevice.currentDevice.userInterfaceIdiom == UIUserInterfaceIdiomPad){
         UITapGestureRecognizer *coordinateListener =
@@ -172,38 +208,28 @@ static NSInteger _currentWindows = 0;
         [coordinateListener setNumberOfTouchesRequired:1];
         [[self view] addGestureRecognizer:coordinateListener];
     }
-    
-    self.hideWebviewAlpha = [appConfig.hideWebviewAlpha floatValue];
-    self.statusBarOverlay = NO;
+
+    self.hideWebviewAlpha = config.configRoot.styling.hideWebviewAlpha;
+    self.statusBarOverlay = config.configRoot.styling.iosEnableOverlayInStatusBar;
     self.savedScreenBrightness = -1;
     self.restoreBrightnessOnNavigation = NO;
-    self.sidebarItemsEnabled = YES;
-    
-    self.tabManager = [[LEANTabManager alloc] initWithTabBar:self.tabBar webviewController:self];
-    self.toolbarManager = [[LEANToolbarManager alloc] initWithToolbar:self.toolbar webviewController:self];
-    self.JSBridgeInterface = [[GNJSBridgeInterface alloc] init];
+    self.previousScrollY = 0;
+
+    self.tabManager = [[LEANTabManager alloc] initWithTabBar:self.tabBar heightConstraint:self.tabbarHeightConstraint wvc:self];
+    self.toolbarManager = [[LEANToolbarManager alloc] initWithToolbar:self.toolbar heightConstraint:self.toolbarHeightConstraint wvc:self];
+    self.messageRouter = [MCKMPIOSCommandFactory.shared registerAllRouter:[[MCKMPMessageRouter alloc] init]];
     self.fileWriterSharer = [[GNFileWriterSharer alloc] init];
     self.fileWriterSharer.wvc = self;
     self.customHeadersManager = [[GNCustomHeaders alloc] init];
-    
+
     // Launch screen overlay
     [[LEANLaunchScreenManager sharedManager] showWithParentViewController:self];
-    
+
     // set title to application title
-    if ([appConfig.navTitles count] == 0) {
-        self.navigationItem.title = appConfig.appName;
+    if (config.navigationTitles.count == 0) {
+        self.navigationItem.title = config.configRoot.general.appName;
     }
-    
-    // add nav button
-    if (appConfig.showNavigationMenu &&  [self isRootWebView]) {
-        [self showSidebarNavButton];
-    }
-    
-    // profile picker
-    if (appConfig.profilePickerJS && [appConfig.profilePickerJS length] > 0) {
-        self.profilePickerJs = appConfig.profilePickerJS;
-    }
-    
+
     self.visitedLoginOrSignup = NO;
     
     if (self.initialWebview) {
@@ -216,7 +242,7 @@ static NSInteger _currentWindows = 0;
         }
         
     } else {
-        if (appConfig.userAgentReady) {
+        if ([LEANUserAgentManager sharedManager].userAgentReady) {
             [self initializeWebview];
         } else {
             [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(didReceiveNotification:) name:kGoNativeAppConfigNotificationUserAgentReady object:nil];
@@ -226,19 +252,26 @@ static NSInteger _currentWindows = 0;
     // hide ad banner view initially
     self.pluginViewTopWebviewBottomConstraint.active = NO;
     
+    // Move bottom tab bar down when glass design is enabled
+    if ([LEANUtilities isGlassDesignEnabled]) {
+        self.tabBarBottomConstraint.active = NO;
+        self.tabBarBottomConstraint = [self.view.bottomAnchor constraintEqualToAnchor:self.tabBar.bottomAnchor];
+        self.tabBarBottomConstraint.active = YES;
+    }
+    
     // hidden nav bar
-    if (!appConfig.showNavigationBar && [self isRootWebView]) {
+    if (!config.configRoot.styling.showNavigationBar && [self isRootWebView]) {
         UIToolbar *bar = [[UIToolbar alloc] init];
-        if ([appConfig.iosTheme isEqualToString:@"dark"]) {
+        if ([config.configRoot.styling.iosTheme isEqualToString:@"dark"]) {
             bar.barStyle = UIBarStyleBlack;
         }
         self.statusBarBackground = bar;
         [self.view addSubview:self.statusBarBackground];
     }
-    
-    [self updateStatusBarBackgroundColor:[UIColor colorNamed:@"statusBarBackgroundColor"] enableBlurEffect:appConfig.iosEnableBlurInStatusBar];
-    
-    self.sidebarItemsEnabled = appConfig.showNavigationMenu && [self isRootWebView];
+
+
+    [self updateStatusBarBackgroundColor:[UIColor colorNamed:@"statusBarBackgroundColor"] enableBlurEffect:config.configRoot.styling.iosEnableBlurInStatusBar];
+
     [self updateNavigationBarItemsAnimated:NO];
     [self buildDefaultToobar];
     self.keyboardVisible = NO;
@@ -248,6 +281,7 @@ static NSInteger _currentWindows = 0;
     [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(didReceiveNotification:) name:kLEANAppConfigNotificationProcessedTabNavigation object:nil];
     [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(didReceiveNotification:) name:kLEANAppConfigNotificationProcessedNavigationTitles object:nil];
     [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(didReceiveNotification:) name:kLEANAppConfigNotificationProcessedNavigationLevels object:nil];
+    [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(didReceiveNotification:) name:kLEANAppConfigNotificationNavigationInstanceChanged object:nil];
     [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(didReceiveNotification:) name:UIApplicationDidBecomeActiveNotification object:nil];
     [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(didReceiveNotification:) name:kReachabilityChangedNotification object:nil];
     [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(didReceiveNotification:) name:UIContentSizeCategoryDidChangeNotification object:nil];
@@ -272,15 +306,15 @@ static NSInteger _currentWindows = 0;
     self.configPreferences = [GNConfigPreferences sharedPreferences];
     self.documentSharer = [LEANDocumentSharer sharedSharer];
     self.keyboardManager = [LEANKeyboardManager shared];
-    self.registrationManager = [GNRegistrationManager sharedManager];
     self.pdfManager = [LEANPDFManager shared];
     self.loadingSpinnerManager = [[LEANLoadingSpinnerManager alloc] initWithVc:self];
+    self.viewportManager = [WebViewViewportManager shared];
     
     // we will always be loading a page at launch, hide webview here to fix a white flash for dark themed apps
     [self hideWebview];
     
     // enable full screen webview i.e turn off safe area constraints
-    if(appConfig.iosFullScreenWebview){
+    if(config.configRoot.general.iosFullScreenWebview){
         // webview
         [self.webviewLeftSafeAreaLeft setActive:NO];
         [self.webviewRightSafeAreaRight setActive:NO];
@@ -292,12 +326,18 @@ static NSInteger _currentWindows = 0;
         [self.toolbarRightSafeAreaRight setActive:NO];
     }
     
+    // add nav button
+    if (config.showNavigationMenu && [self isRootWebView]) {
+        [self setSidebarEnabled:YES];
+    }
+    
     // set initial native theme
     NSString *mode = [[NSUserDefaults standardUserDefaults] objectForKey:@"darkMode"];
-    [self setNativeTheme:mode ?: appConfig.iosDarkMode];
-    [self updateStatusBarStyle:appConfig.iosStatusBarStyle];
-    
-    [((LEANAppDelegate *)[UIApplication sharedApplication].delegate).bridge runnerDidLoad:self];
+    [self setNativeTheme:mode ?: config.configRoot.styling.iosDarkMode];
+    [self updateStatusBarStyle:config.configRoot.styling.iosStatusBarStyle];
+    [self updateStatusBarOverlay:config.configRoot.styling.iosEnableOverlayInStatusBar];
+
+    [((LEANAppDelegate *)[UIApplication sharedApplication].delegate).bridge onViewDidLoadHost:self];
 }
 
 - (BOOL)canBecomeFirstResponder {
@@ -320,17 +360,17 @@ static NSInteger _currentWindows = 0;
 
 -(void)initializeWebview
 {
-    GoNativeAppConfig *appConfig = [GoNativeAppConfig sharedAppConfig];
+    MCKMPMutableConfigState *appConfig = medianConfig();
     WKWebViewConfiguration *config = [[NSClassFromString(@"WKWebViewConfiguration") alloc] init];
     config.processPool = [LEANUtilities wkProcessPool];
     config.allowsInlineMediaPlayback = YES;
-    
+
     WKWebView *wv = [[NSClassFromString(@"WKWebView") alloc] initWithFrame:self.wkWebview.frame configuration:config];
     [LEANUtilities configureWebView:wv];
-    
+
     [self.keyboardManager setTargetWebview:wv];
-    [self.keyboardManager showKeyboardAccessoryView:appConfig.showKeyboardAccessoryView];
-    
+    [self.keyboardManager showKeyboardAccessoryView:appConfig.configRoot.general.iosShowKeyboardAccessoryView];
+
     [self switchToWebView:wv showImmediately:NO];
     
 #if DEBUG
@@ -350,21 +390,22 @@ static NSInteger _currentWindows = 0;
             [self.configPreferences setInitialUrl:initialUrlPref];
         }
     }
-    if (!self.initialUrl && appConfig.initialURL) {
-        NSURLComponents *components = [[NSURLComponents alloc] initWithURL:appConfig.initialURL resolvingAgainstBaseURL:NO];
+    NSURL *configInitialUrl = [NSURL URLWithString:appConfig.initialUrl];
+    if (!self.initialUrl && configInitialUrl) {
+        NSURLComponents *components = [[NSURLComponents alloc] initWithURL:configInitialUrl resolvingAgainstBaseURL:NO];
         NSMutableArray *newQueryItems = [NSMutableArray array];
         if (components.queryItems) {
             [newQueryItems addObjectsFromArray:components.queryItems];
         }
-        
+
         NSArray *addedQueryItems = [((LEANAppDelegate *)[UIApplication sharedApplication].delegate).bridge getInitialUrlQueryItems];
         [newQueryItems addObjectsFromArray:addedQueryItems];
-        
+
         components.queryItems = newQueryItems;
         if (newQueryItems.count > 0) {
             self.initialUrl = [components URL];
         } else {
-            self.initialUrl = appConfig.initialURL;
+            self.initialUrl = configInitialUrl;
         }
     }
     
@@ -414,26 +455,35 @@ static NSInteger _currentWindows = 0;
     else if ([name isEqualToString:kLEANAppConfigNotificationProcessedNavigationTitles]) {
         NSURL *url = nil;
         if (self.wkWebview) url = self.wkWebview.URL;
-        
+
         if (url) {
             NSString *newTitle = [LEANWebViewController titleForUrl:url];
             if (newTitle) {
                 self.navigationItem.title = newTitle;
             } else {
-                self.navigationItem.title = [GoNativeAppConfig sharedAppConfig].appName;
+                self.navigationItem.title = medianConfig().configRoot.general.appName;
             }
         }
     }
     else if ([name isEqualToString:kLEANAppConfigNotificationProcessedNavigationLevels]) {
         NSURL *url = nil;
         if (self.wkWebview) url = self.wkWebview.URL;
-        
+
         if (url) {
             self.urlLevel = [LEANWebViewController urlLevelForUrl:url];
         }
-    } else if ([name isEqualToString:UIContentSizeCategoryDidChangeNotification]) {
+    }
+    else if ([name isEqualToString:kLEANAppConfigNotificationNavigationInstanceChanged]) {
+        // nav2 (A1): since 2.4.1 the resolver is pure and this fires only when the JS
+        // override layer changes. Re-render for our own current URL only; hidden
+        // controllers re-apply in viewWillAppear.
+        if (self.viewIfLoaded.window && self.wkWebview.URL) {
+            [self applyNav2ForUrl:self.wkWebview.URL];
+        }
+    }
+    else if ([name isEqualToString:UIContentSizeCategoryDidChangeNotification]) {
         NSString *contentSizeCategory = notification.userInfo[UIContentSizeCategoryNewValueKey];
-        [self applyCssForContentSizeCategory:contentSizeCategory];
+        [LEANUtilities applyFontScalingForContentSize:contentSizeCategory toWebView:self.wkWebview asUserScript:NO];
     }
 }
 
@@ -444,8 +494,8 @@ static NSInteger _currentWindows = 0;
     self.keyboardRect = kbRect;
     self.keyboardVisible = YES;
     [self adjustInsets];
-    
-    [self runKeyboardInfoWithCallback:[GoNativeAppConfig sharedAppConfig].listeners[MEDIAN_KEYBOARD_EVENT_LISTENER]];
+
+    [self runKeyboardInfoWithCallback:self.keyboardListenerCallback];
 }
 
 - (void)keyboardHidden:(NSNotification*)notification
@@ -455,10 +505,11 @@ static NSInteger _currentWindows = 0;
     [self adjustInsets];
     
     // work around a bug starting in iOS 12 where the scroll doesn't readjust when the keyboard is hidden
-    [self.wkWebview.scrollView setContentInset:UIEdgeInsetsMake(0.0001, 0, 0, 0)];
-    [self.wkWebview.scrollView setContentInset:UIEdgeInsetsMake(0, 0, 0, 0)];
-    
-    [self runKeyboardInfoWithCallback:[GoNativeAppConfig sharedAppConfig].listeners[MEDIAN_KEYBOARD_EVENT_LISTENER]];
+    UIEdgeInsets inset = self.wkWebview.scrollView.contentInset;
+    [self.wkWebview.scrollView setContentInset:UIEdgeInsetsMake(inset.top + 0.0001, inset.left, inset.bottom, inset.right)];
+    [self.wkWebview.scrollView setContentInset:inset];
+
+    [self runKeyboardInfoWithCallback:self.keyboardListenerCallback];
 }
 
 - (void)retryFailedPage
@@ -502,8 +553,8 @@ static NSInteger _currentWindows = 0;
 - (void)viewWillAppear:(BOOL)animated
 {
     [super viewWillAppear:animated];
-    
-    if ([GoNativeAppConfig sharedAppConfig].pullToRefresh) {
+
+    if (medianConfig().configRoot.navigation.iosPullToRefresh) {
         [self addPullToRefresh];
     }
     
@@ -516,8 +567,8 @@ static NSInteger _currentWindows = 0;
     }
     
     [self addScriptMessageHandlersInWebView:self.wkWebview];
-    
-    [((LEANAppDelegate *)[UIApplication sharedApplication].delegate).bridge runnerWillAppear:self];
+
+    [((LEANAppDelegate *)[UIApplication sharedApplication].delegate).bridge onViewWillAppearHost:self];
 }
 
 - (void)viewWillDisappear:(BOOL)animated
@@ -528,8 +579,8 @@ static NSInteger _currentWindows = 0;
         [[NSNotificationCenter defaultCenter] postNotificationName:kLEANWebViewControllerUserFinishedLoading object:self];
     }
     [super viewWillDisappear:animated];
-    
-    [((LEANAppDelegate *)[UIApplication sharedApplication].delegate).bridge runnerWillDisappear:self];
+
+    [((LEANAppDelegate *)[UIApplication sharedApplication].delegate).bridge onViewWillDisappearHost:self];
 }
 
 - (void)traitCollectionDidChange:(UITraitCollection *)previousTraitCollection
@@ -541,8 +592,8 @@ static NSInteger _currentWindows = 0;
 - (void) buildDefaultToobar
 {
     NSMutableArray *array = [self.toolbarItems mutableCopy];
-    
-    if ([GoNativeAppConfig sharedAppConfig].showShareButton) {
+
+    if (medianConfig().configRoot.showShareButton.boolValue) {
         UIBarButtonItem *shareButton = [[UIBarButtonItem alloc] initWithBarButtonSystemItem:UIBarButtonSystemItemAction target:self action:@selector(buttonPressed:)];
         shareButton.tag = 3;
         [array addObject:[[UIBarButtonItem alloc] initWithBarButtonSystemItem:UIBarButtonSystemItemFlexibleSpace target:nil action:nil]];
@@ -555,9 +606,8 @@ static NSInteger _currentWindows = 0;
 -(void)setSidebarEnabled:(BOOL)enabled
 {
     if (![self isRootWebView]) return;
-    
-    GoNativeAppConfig *appConfig = [GoNativeAppConfig sharedAppConfig];
-    if (!appConfig.showNavigationMenu) return;
+
+    if (!medianConfig().showNavigationMenu && !medianConfig().isNativeNavigationV2) return;
     
     LEANNavigationController *navController = (LEANNavigationController*)self.navigationController;
     [navController setSidebarEnabled:enabled];
@@ -575,16 +625,107 @@ static NSInteger _currentWindows = 0;
     dispatch_async(dispatch_get_main_queue(), ^{
         [self checkNavigationTitleImageForUrl:url];
         [self.tabManager autoSelectTabForUrl:url];
-        
-        GoNativeAppConfig *appConfig = [GoNativeAppConfig sharedAppConfig];
-        [self setSidebarEnabled:[appConfig shouldShowSidebarForUrl:[url absoluteString]]];
     });
+}
+
+// Native Navigation V2: resolve the per-URL instance and feed the existing V1 bar machinery
+- (void)applyNav2ForUrl:(NSURL*)url
+{
+    if (!url) return;
+    MCKMPResolvedNavigation *resolved = [medianConfig() resolveNavigationForUrlUrl:url.absoluteString ?: @""];
+    if (!resolved) return;
+
+    dispatch_async(dispatch_get_main_queue(), ^{
+        self.hasAppliedNav2 = YES; // A1: per-controller tracking
+        self.lastAppliedTopNav = resolved.topNavigationBar;
+        MCKMPTopNavComponent *topNav = resolved.topNavigationBar;
+        MCKMPSidebarComponent *sidebar = resolved.sidebarNavigationBar;
+
+        // sidebar: items into the existing menu controller. The hamburger follows the sidebar
+        // alone, as in V1, App Studio and Android: allowLeftMenu is the top bar's left slot,
+        // and gating the sidebar on it hid the sidebar whenever that slot was off.
+        // The menu is shared by the whole stack and belongs to the root screen.
+        if ([self isRootWebView]) {
+            BOOL sidebarActive = sidebar && sidebar.active && sidebar.items.count > 0;
+            [(LEANMenuViewController*)self.frostedViewController.menuViewController setNav2MenuItems:sidebarActive ? sidebar.items : @[]];
+            [self setSidebarEnabled:sidebarActive];
+        }
+
+        // top bar: buttons via the action manager, visibility + title via dynamicTitle
+        [self.actionManager loadNav2TopNav:topNav];
+        [self applyNav2TopBar:topNav forUrl:url];
+
+        // bottom tabs
+        if (!self.tabManager.javascriptTabs) {
+            [self.tabManager loadNav2Component:resolved.bottomTabBar forUrl:url];
+        }
+
+        // contextual toolbar
+        [self.toolbarManager didLoadNav2Url:url component:resolved.contextualNavToolbar];
+        [self.toolbar layoutSubviews];
+    });
+}
+
+// nav2 top bar: `active` is the visibility switch; dynamicTitle carries V1 navigationTitles semantics
+- (void)applyNav2TopBar:(MCKMPTopNavComponent*)topNav forUrl:(NSURL*)url
+{
+    BOOL hideForWindowOpen = self.isWindowOpen && LEANWebViewController.windowOpenHideNavbar;
+    if (!topNav || !topNav.active || hideForWindowOpen) {
+        self.isShowingTopNavBar = NO;
+        self.defaultTitleView = nil;
+        self.navigationItem.titleView = nil;
+        [self.navigationController setNavigationBarHidden:YES animated:YES];
+        return;
+    }
+
+    NSString *title = nil;
+    BOOL showImage = NO;
+    MCKMPDynamicTitle *dynamicTitle = topNav.dynamicTitle;
+    if (dynamicTitle) {
+        NSString *urlString = url.absoluteString ?: @"";
+        BOOL matched = NO;
+        // per-URL rules first (V1 NavigationTitleRule semantics: first regex match wins)
+        for (MCKMPNavigationTitleRule *rule in dynamicTitle.titles) {
+            @try {
+                NSPredicate *predicate = [NSPredicate predicateWithFormat:@"SELF MATCHES %@", rule.regex];
+                if ([predicate evaluateWithObject:urlString]) {
+                    showImage = rule.showImage;
+                    title = (rule.customTitle && rule.title.length > 0) ? rule.title : self.wkWebview.title;
+                    matched = YES;
+                    break;
+                }
+            }
+            @catch (NSException *exception) {
+                NSLog(@"Error in nav2 title regex: %@", exception);
+            }
+        }
+        if (!matched) {
+            showImage = dynamicTitle.showImage;
+            if (dynamicTitle.customTitle && dynamicTitle.title.length > 0) {
+                title = dynamicTitle.title;
+            }
+        }
+    }
+    if (!showImage && title.length == 0) {
+        title = medianConfig().configRoot.general.appName;
+    }
+
+    [self renderNavigationTitle:title showImage:showImage];
+
+    // an active nav2 top bar stays visible even without a title
+    self.isShowingTopNavBar = YES;
+    [self.navigationController setNavigationBarHidden:NO animated:YES];
 }
 
 - (void)checkNavigationForUrl:(NSURL*) url;
 {
+    if (medianConfig().isNativeNavigationV2) {
+        [self applyNav2ForUrl:url];
+        return;
+    }
+
     if (!self.tabManager.javascriptTabs) {
-        if (![GoNativeAppConfig sharedAppConfig].tabMenus) {
+        if (medianConfig().configRoot.navigation.tabNavigation.tabMenus.count == 0) {
             dispatch_async(dispatch_get_main_queue(), ^{
                 [self hideTabBarAnimated:YES];
             });
@@ -607,43 +748,60 @@ static NSInteger _currentWindows = 0;
 - (void)checkNavigationTitleImageForUrl:(NSURL*)url
 {
     // check if navbar titles has regex match
-    GoNativeAppConfig *appConfig = [GoNativeAppConfig sharedAppConfig];
+    MCKMPMutableConfigState *appConfig = medianConfig();
+
+    if (appConfig.isNativeNavigationV2) {
+        MCKMPResolvedNavigation *resolved = [appConfig resolveNavigationForUrlUrl:url.absoluteString ?: @""];
+        // A1: top-bar-only refreshes (pre-navigation target URL, title KVO on the old
+        // URL) can race the full apply. Once a top bar has been rendered, only
+        // refreshes resolving to that same top bar go through here; top bar switches
+        // render via applyNav2ForUrl: on the actual navigation event.
+        MCKMPTopNavComponent *topNav = resolved.topNavigationBar;
+        BOOL sameTopNav = !self.hasAppliedNav2 ||
+            topNav == self.lastAppliedTopNav || [topNav isEqual:self.lastAppliedTopNav];
+        if (resolved && sameTopNav) {
+            [self applyNav2TopBar:topNav forUrl:url];
+        }
+        return;
+    }
+
     NSString *title;
     BOOL showImageView = NO;
-    
+
     // Handle windowOpenHideNavbar
-    if (!self.isWindowOpen || !appConfig.windowOpenHideNavbar) {
+    if (!self.isWindowOpen || !LEANWebViewController.windowOpenHideNavbar) {
         BOOL hasRegexMatch = NO;
-        
-        // Check regex match
-        if ([appConfig.navTitles isKindOfClass:[NSArray class]]) {
-            for (NSDictionary *entry in appConfig.navTitles) {
-                NSPredicate *predicate = entry[@"predicate"];
-                if ([predicate evaluateWithObject:url.absoluteString]) {
-                    showImageView = [entry[@"showImage"] boolValue];
-                    title = entry[@"title"] ?: self.wkWebview.title;
-                    hasRegexMatch = YES;
-                    break;
-                }
-            }
+
+        // Check regex match (first matching rule wins)
+        MCKMPNavigationTitleRule *rule = [appConfig titleRuleForUrlUrl:url.absoluteString ?: @""];
+        if (rule) {
+            showImageView = rule.showImage;
+            title = (rule.customTitle && rule.title.length > 0) ? rule.title : self.wkWebview.title;
+            hasRegexMatch = YES;
         }
-        
+
         // If no regex match and display mode is always
-        if (!hasRegexMatch && appConfig.showNavigationBar) {
-            showImageView = appConfig.isNavigationTitleImage;
-            title = appConfig.appName;
+        if (!hasRegexMatch && appConfig.configRoot.styling.showNavigationBar) {
+            showImageView = appConfig.configRoot.styling.navigationTitleImage;
+            title = appConfig.configRoot.general.appName;
         }
     }
-    
+
+    [self renderNavigationTitle:title showImage:showImageView];
+}
+
+// shared title/image rendering for the V1 and nav2 paths; sets isShowingTopNavBar
+- (void)renderNavigationTitle:(NSString*)title showImage:(BOOL)showImageView
+{
     self.navigationItem.title = nil;
-    
+
     // show logo in navigation bar
     if (showImageView) {
         // create the view if necesary
         if (!self.navigationTitleImageView) {
-            UIImage *im = [GoNativeAppConfig sharedAppConfig].navigationTitleIcon;
-            if (!im) im = [UIImage imageNamed:@"NavBarImage"];
-            
+            // production uses the bundled NavBarImage asset (preview override is a builder concern)
+            UIImage *im = [UIImage imageNamed:@"NavBarImage"];
+
             if (im) {
                 CGRect bounds = CGRectMake(0, 0, 30 * im.size.width / im.size.height, 30);
                 UIView *backView = [[UIView alloc] initWithFrame:bounds];
@@ -658,18 +816,28 @@ static NSInteger _currentWindows = 0;
         // set the view
         self.defaultTitleView = self.navigationTitleImageView;
         self.navigationItem.titleView = self.navigationTitleImageView;
-        [self.navigationController setNavigationBarHidden:NO animated:YES];
+        self.isShowingTopNavBar = YES;
     } else {
         self.defaultTitleView = nil;
         self.navigationItem.titleView = nil;
+        self.isShowingTopNavBar = title != nil;
         
-        if (title) {
-            self.navigationItem.title = title;
-            [self.navigationController setNavigationBarHidden:NO animated:YES];
-        } else {
-            [self.navigationController setNavigationBarHidden:YES animated:YES];
+        if ([title isKindOfClass:[NSString class]] && title.length > 0) {
+            if (@available(iOS 26.0, *)) {
+                if ([LEANUtilities isGlassDesignEnabled]) {
+                    LEANLiquidTitleView *titleView = [LEANLiquidTitleView new];
+                    titleView.text = title;
+                    self.navigationItem.titleView = titleView;
+                } else {
+                    self.navigationItem.title = title;
+                }
+            } else {
+                self.navigationItem.title = title;
+            }
         }
     }
+    
+    [self.navigationController setNavigationBarHidden:!self.isShowingTopNavBar animated:YES];
 }
 
 - (void)hideTabBarAnimated:(BOOL)animated
@@ -698,16 +866,22 @@ static NSInteger _currentWindows = 0;
 
 - (void)showBottomBar:(UIView*)bar constraint:(NSLayoutConstraint*)constraint animated:(BOOL)animated
 {
-    if (!bar.hidden) return;
+    if ([self.barVisibility objectForKey:bar].boolValue) {
+        return;
+    }
     
     [self.view layoutIfNeeded];
     bar.hidden = NO;
     constraint.constant = 0;
+    [self.barVisibility setObject:@YES forKey:bar];
+    
     if (animated) {
         [UIView animateWithDuration:0.3 animations:^(void){
             [self.view layoutIfNeeded];
         } completion:^(BOOL finished){
-            [self adjustInsets];
+            if ([self.barVisibility objectForKey:bar].boolValue) {
+                [self adjustInsets];
+            }
         }];
     } else {
         [self.view layoutIfNeeded];
@@ -721,17 +895,22 @@ static NSInteger _currentWindows = 0;
     CGFloat barHeight = MIN(bar.bounds.size.width, bar.bounds.size.height);
     constraint.constant = -barHeight;
 
-    if (bar.hidden) {
+    NSNumber *visibility = [self.barVisibility objectForKey:bar];
+    if (visibility != nil && !visibility.boolValue) {
         [self.view layoutIfNeeded];
         return;
     }
+    
+    [self.barVisibility setObject:@NO forKey:bar];
     
     if (animated) {
         [UIView animateWithDuration:0.3 animations:^(void){
             [self.view layoutIfNeeded];
         } completion:^(BOOL finished){
-            bar.hidden = YES;
-            [self adjustInsets];
+            if (![self.barVisibility objectForKey:bar].boolValue) {
+                bar.hidden = YES;
+                [self adjustInsets];
+            }
         }];
     } else {
         [self.view layoutIfNeeded];
@@ -740,27 +919,54 @@ static NSInteger _currentWindows = 0;
     }
 }
 
+- (CGFloat)getNavigationBarBottomY {
+    UINavigationBar *navigationBar = self.navigationController.navigationBar;
+    CGRect navigationBarFrame = navigationBar.frame;
+
+    if (navigationBar.superview) {
+        navigationBarFrame = [navigationBar.superview convertRect:navigationBarFrame toView:self.view];
+    }
+
+    CGFloat y = CGRectGetMaxY(navigationBarFrame);
+    
+    // y is 0 when the navbar is hidden, so save the last value
+    if (y > 0) {
+        self.lastNavBarBottomY = y;
+        return y;
+    }
+    
+    return self.lastNavBarBottomY;
+}
+
+- (void)applyStatusBarOverlay {
+    CGFloat statusBarHeight = [UIApplication sharedApplication].currentStatusBarFrame.size.height;
+        
+    // Top guide is equal to super view (below top navbar)
+    if ([LEANUtilities isGlassDesignEnabled]) {
+        self.topGuideConstraint.constant = self.statusBarOverlay ? 0 : statusBarHeight;
+        
+        if (self.isShowingTopNavBar) {
+            CGFloat topInset = MAX(0, [self getNavigationBarBottomY] - self.topGuideConstraint.constant);
+            self.wkWebview.scrollView.contentInset = UIEdgeInsetsMake(topInset, 0, 0, 0);
+            if (@available(iOS 26.0, *)) {
+                self.wkWebview.obscuredContentInsets = UIEdgeInsetsMake(topInset, 0, 0, 0);
+            }
+        }
+    }
+    else {
+        CGFloat topInset = statusBarHeight;
+        if (self.isShowingTopNavBar) {
+            topInset = [self getNavigationBarBottomY];
+        }
+        self.topGuideConstraint.constant = self.statusBarOverlay ? 0 : topInset;
+    }
+}
+
 - (void)adjustInsets
 {
     // This function used to adjust the content inset of the webview's scrollview, but we
     // have moved away from that strategy. Now we just let autolayout constraints resize
     // the webview frame, and set masksToBounds=false
-}
-
-- (void)applyStatusBarOverlay
-{
-    if (self.statusBarOverlay) {
-        if (@available(iOS 11.0, *)) {
-            // need a larger offset than 20 for iPhone X
-            self.topGuideConstraint.constant = -self.view.safeAreaInsets.top;
-        } else {
-            self.topGuideConstraint.constant = -20.0;
-        }
-    } else {
-        // use the gap between safeArea and statusbar as constraint if top nav bar is hidden
-        float gap = self.view.safeAreaInsets.top - [UIApplication sharedApplication].currentStatusBarFrame.size.height;
-        self.topGuideConstraint.constant = gap < 20.0 ? -gap : 0;
-    }
 }
 
 - (IBAction) buttonPressed:(id)sender
@@ -906,9 +1112,7 @@ static NSInteger _currentWindows = 0;
     // stop webview pools
     [[NSNotificationCenter defaultCenter] postNotificationName:kLEANWebViewControllerUserStartedLoading object:self];
     [[LEANWebViewPool sharedPool] flushAll];
-    // stop login detection
-    [[LEANLoginManager sharedManager] stopChecking];
-    
+
     // clear cookies
     NSHTTPCookie *cookie;
     NSHTTPCookieStorage *storage = [NSHTTPCookieStorage sharedHTTPCookieStorage];
@@ -916,11 +1120,11 @@ static NSInteger _currentWindows = 0;
         [storage deleteCookie:cookie];
     }
     [[NSUserDefaults standardUserDefaults] synchronize];
-    
+
     // load initial page in bottom webview
     [self.navigationController popToRootViewControllerAnimated:NO];
-    [self.navigationController.viewControllers[0] loadUrl:[GoNativeAppConfig sharedAppConfig].initialURL];
-    
+    [self.navigationController.viewControllers[0] loadUrl:[NSURL URLWithString:medianConfig().initialUrl]];
+
     [(LEANMenuViewController*)self.frostedViewController.menuViewController updateMenuWithStatus:@"default"];
 }
 
@@ -1011,7 +1215,7 @@ static NSInteger _currentWindows = 0;
 - (void) loadUrl:(NSURL *)url
 {
     // in case this is called before the user agent stuff has finished
-    if (![GoNativeAppConfig sharedAppConfig].userAgentReady) {
+    if (![LEANUserAgentManager sharedManager].userAgentReady) {
         self.initialUrl = url;
         return;
     }
@@ -1034,7 +1238,7 @@ static NSInteger _currentWindows = 0;
     }
     
     NSMutableURLRequest *request = [NSMutableURLRequest requestWithURL:url];
-    NSNumber *timeout = [GoNativeAppConfig sharedAppConfig].iosConnectionOfflineTime;
+    NSNumber *timeout = medianConfig().configRoot.navigation.iosConnectionOfflineTime;
     if (timeout) {
         request = [NSMutableURLRequest requestWithURL:url cachePolicy:NSURLRequestReloadIgnoringLocalCacheData timeoutInterval:[timeout doubleValue]];
     }
@@ -1136,42 +1340,14 @@ static NSInteger _currentWindows = 0;
 
 + (NSInteger) urlLevelForUrl:(NSURL*)url;
 {
-    NSArray *entries = [GoNativeAppConfig sharedAppConfig].navStructureLevels;
-    if (entries) {
-        NSString *urlString = [url absoluteString];
-        for (NSDictionary *entry in entries) {
-            NSPredicate *predicate = entry[@"predicate"];
-            BOOL matches = NO;
-            @try {
-                matches = [predicate evaluateWithObject:urlString];
-            }
-            @catch (NSException* exception) {
-                NSLog(@"Regex error in regexInternalExternal: %@", exception);
-            }
-
-            if (matches) {
-                return [entry[@"level"] integerValue];
-            }
-        }
-    }
-
-    // return -1 for unknown
-    return -1;
+    // -1 for unknown
+    return [medianConfig() urlLevelForUrlUrl:[url absoluteString] ?: @""];
 }
 
 + (NSString*) titleForUrl:(NSURL*)url
 {
-    NSArray *entries = [GoNativeAppConfig sharedAppConfig].navTitles;
-    if (!entries) return nil;
-    
-    NSString *urlString = [url absoluteString];
-    for (NSDictionary *entry in entries) {
-        NSPredicate *predicate = entry[@"predicate"];
-        if ([predicate evaluateWithObject:urlString]) {
-            return entry[@"title"];
-        }
-    }
-    
+    MCKMPNavigationTitleRule *rule = [medianConfig() titleRuleForUrlUrl:[url absoluteString] ?: @""];
+    if (rule && rule.customTitle) return rule.title;
     return nil;
 }
 
@@ -1212,7 +1388,7 @@ static NSInteger _currentWindows = 0;
     
     // is target="_blank" and we are allowing window open? Always accept, skipping logic. This makes
     // target="_blank" behave like window.open
-    if (navigationAction.targetFrame == nil && [GoNativeAppConfig sharedAppConfig].enableWindowOpen) {
+    if (navigationAction.targetFrame == nil && medianConfig().configRoot.general.enableWindowOpen) {
         decisionHandler(WKNavigationActionPolicyAllow, preferences);
         return;
     }
@@ -1238,7 +1414,7 @@ static NSInteger _currentWindows = 0;
     BOOL openShareDialog = [navigationAction.request.URL.scheme isEqualToString:@"data"] && ![LEANUtilities isOnePixelImage:navigationAction.request.URL];
     if (@available(iOS 15.0, *)) {
         if (navigationAction.shouldPerformDownload) {
-            openShareDialog = [((LEANAppDelegate *)UIApplication.sharedApplication.delegate).bridge webView:webView shouldDownloadUrl:navigationAction.request.URL];
+            openShareDialog = [((LEANAppDelegate *)UIApplication.sharedApplication.delegate).bridge shouldDownloadUrlWebView:webView url:navigationAction.request.URL];
         }
     }
     
@@ -1281,7 +1457,7 @@ static NSInteger _currentWindows = 0;
         return;
     }
     
-    [((LEANAppDelegate *)[UIApplication sharedApplication].delegate).bridge webView:webView handleURL:navigationResponse.response.URL];
+    [((LEANAppDelegate *)[UIApplication sharedApplication].delegate).bridge webViewHandleURLWebView:webView url:navigationResponse.response.URL];
     
     if ([@"application/vnd.apple.pkpass" isEqualToString:navigationResponse.response.MIMEType]) {
         decisionHandler(WKNavigationResponsePolicyCancel);
@@ -1323,7 +1499,7 @@ static NSInteger _currentWindows = 0;
             
             // If using WKWebView on iOS11+, get cookies from WKHTTPCookieStore
             BOOL gettingWKWebviewCookies = NO;
-            if ([GoNativeAppConfig sharedAppConfig].useWKWebView) {
+            if (medianConfig().configRoot.general.useWKWebView) {
                 if (@available(iOS 11.0, *)) {
                     gettingWKWebviewCookies = YES;
                     WKHTTPCookieStore *cookieStore = [WKWebsiteDataStore defaultDataStore].httpCookieStore;
@@ -1347,6 +1523,12 @@ static NSInteger _currentWindows = 0;
                 downloadPass();
             }
         });
+        return;
+    }
+    
+    if ([@"text/vcard" isEqualToString:navigationResponse.response.MIMEType]) {
+        [self.documentSharer shareUrl:navigationResponse.response.URL fromView:self.wkWebview];
+        decisionHandler(WKNavigationResponsePolicyCancel);
         return;
     }
     
@@ -1387,13 +1569,26 @@ static NSInteger _currentWindows = 0;
 
 - (void)addScriptMessageHandlersInWebView:(WKWebView*)wkWebview {
     [self removeScriptMessageHandlersInWebView:wkWebview];
-    [wkWebview.configuration.userContentController addScriptMessageHandler:self.JSBridgeInterface name:GNJSBridgeName];
+    // MCKMPWebViewBridge registers itself on both "JSBridge" (legacy) and "medianBridge"
+    self.medianBridge = [[MCKMPWebViewBridge alloc] initWithWebView:wkWebview router:self.messageRouter host:self gate:self];
     [wkWebview.configuration.userContentController addScriptMessageHandler:self.fileWriterSharer name:GNFileWriterSharerName];
+    [wkWebview.configuration.userContentController addScriptMessageHandler:[LEANWindowOverrideHandler shared] name:LEANWindowOverrideHandlerName];
 }
 
 - (void)removeScriptMessageHandlersInWebView:(WKWebView*)wkWebview {
-    [wkWebview.configuration.userContentController removeScriptMessageHandlerForName:GNJSBridgeName];
+    [wkWebview.configuration.userContentController removeScriptMessageHandlerForName:@"JSBridge"];
+    [wkWebview.configuration.userContentController removeScriptMessageHandlerForName:@"medianBridge"];
     [wkWebview.configuration.userContentController removeScriptMessageHandlerForName:GNFileWriterSharerName];
+    [wkWebview.configuration.userContentController removeScriptMessageHandlerForName:LEANWindowOverrideHandlerName];
+}
+
+// MCKMPWebViewBridgeGate: authorization ahead of any JS bridge routing
+- (BOOL)shouldProcessMessageCurrentUrl:(NSString *)currentUrl {
+    if (![LEANUtilities checkNativeBridgeUrl:currentUrl]) {
+        NSLog(@"URL not authorized for native bridge: %@", currentUrl);
+        return NO;
+    }
+    return YES;
 }
 
 -(void)webView:(WKWebView *)webView contextMenuConfigurationForElement:(WKContextMenuElementInfo *)elementInfo completionHandler:(void (^)(UIContextMenuConfiguration * _Nullable))completionHandler {
@@ -1408,11 +1603,10 @@ static NSInteger _currentWindows = 0;
     if (self.wkWebview) {
         currentUrl = self.wkWebview.URL.absoluteString;
     }
-    if (![LEANUtilities checkNativeBridgeUrl:currentUrl]) {
-        NSLog(@"URL not authorized for native bridge: %@", currentUrl);
+    if (![self shouldProcessMessageCurrentUrl:currentUrl]) {
         return;
     }
-    
+
     NSURL *url;
     NSDictionary *query;
     if([data isKindOfClass:[NSURL class]]){
@@ -1423,18 +1617,24 @@ static NSInteger _currentWindows = 0;
         if(!url) return;
         if([data[@"data"] isKindOfClass:[NSDictionary class]]) query = data[@"data"];
     } else return;
-    
-    if (![((LEANAppDelegate *)[UIApplication sharedApplication].delegate).bridge runner:self shouldLoadRequestWithURL:url withData:query]) {
+
+    // plugins may intercept commands before routing
+    if ([((LEANAppDelegate *)[UIApplication sharedApplication].delegate).bridge shouldLoadRequestWithURLHost:self url:url query:query]) {
         return;
     }
-    
-    [[GNJSBridgeHandler shared] handleUrl:url query:query wvc:(id)self];
+
+    if([data isKindOfClass:[NSDictionary class]]) {
+        MCKMPBridgeMessage *message = [self.messageRouter parseJsonBodyJsonBody:data];
+        if (message) [self.messageRouter dispatchMessage:message host:self responder:self];
+    } else {
+        [self.messageRouter routeUrl:url.absoluteString host:self responder:self];
+    }
 }
 
 // currently, sender is used to receive a selected UIBarButtonItem from the action bar
 - (BOOL)shouldLoadRequest:(NSURLRequest*)request isMainFrame:(BOOL)isMainFrame isUserAction:(BOOL)isUserAction hideWebview:(BOOL)hideWebview windowOpen:(BOOL)windowOpen
 {
-    GoNativeAppConfig *appConfig = [GoNativeAppConfig sharedAppConfig];
+    MCKMPMutableConfigState *appConfig = medianConfig();
     NSURL *url = [request URL];
     NSString *urlString = [url absoluteString];
     NSString* hostname = [url host];
@@ -1451,18 +1651,24 @@ static NSInteger _currentWindows = 0;
         return YES;
     }
     
+    // show share dialog for base64 urls
+    if ([url.scheme isEqualToString:@"data"]) {
+        return YES;
+    }
+    
     // blob download
     if (urlString.length == 0) {
         // for some reason we will get an empty url before the actual blob url on iOS 11
         return NO;
     }
+    
     // Only start blob downloads on the main frame
     if ([url.scheme isEqualToString:@"blob"] && isMainFrame) {
         [self.fileWriterSharer downloadBlobUrl:url filename:nil callback:nil];
         return NO;
     }
     
-    if (appConfig.injectMedianJS) {
+    if (appConfig.configRoot.general.injectMedianJS) {
         // inject GoNative JS Bridge Library if regex matches
         if([LEANUtilities checkNativeBridgeUrl:urlString]){
             if(!self.JSBridgeScript){
@@ -1473,9 +1679,14 @@ static NSInteger _currentWindows = 0;
             if(self.JSBridgeScript){
                 WKUserScript *GNJSBridgeLibrary = [[NSClassFromString(@"WKUserScript") alloc] initWithSource:self.JSBridgeScript injectionTime:WKUserScriptInjectionTimeAtDocumentStart forMainFrameOnly:YES];
                 [self.wkWebview.configuration.userContentController addUserScript:GNJSBridgeLibrary];
-                
-                // load plugins' js script
-                [((LEANAppDelegate *)[UIApplication sharedApplication].delegate).bridge loadUserScriptsForContentController:self.wkWebview.configuration.userContentController];
+
+                // load plugins' js script (polyfills via median-core injector), document-start like legacy
+                MCKMPPluginJSInjector *injector = [[MCKMPPluginJSInjector alloc] initWithAssetReader:[[MCKMPIOSAssetReader alloc] init]];
+                NSString *pluginScript = [injector combinedScript];
+                if (pluginScript) {
+                    WKUserScript *pluginUserScript = [[NSClassFromString(@"WKUserScript") alloc] initWithSource:pluginScript injectionTime:WKUserScriptInjectionTimeAtDocumentStart forMainFrameOnly:YES];
+                    [self.wkWebview.configuration.userContentController addUserScript:pluginUserScript];
+                }
             }
         } else {
             NSString *emptyJSBridgeScript = @"gonative = null";
@@ -1591,20 +1802,17 @@ static NSInteger _currentWindows = 0;
     }
     
     [[LEANUrlInspector sharedInspector] inspectUrl:url];
-    
+
     // check redirects
-    if (appConfig.redirects != nil) {
-        NSString *to = [appConfig.redirects valueForKey:urlString];
-        if (!to) to = [appConfig.redirects valueForKey:@"*"];
-        if (to && ![GNUtilities url:to matchesUrl:urlString]) {
-            url = [NSURL URLWithString:to];
-            dispatch_async(dispatch_get_main_queue(), ^{
-                [self loadUrl:url];
-            });
-            return NO;
-        }
+    NSString *to = [appConfig redirectTargetForUrlUrl:urlString];
+    if (to && ![MCKMPUrlUtils.shared urlsMatchIgnoreTrailingUrl1:to url2:urlString]) {
+        url = [NSURL URLWithString:to];
+        dispatch_async(dispatch_get_main_queue(), ^{
+            [self loadUrl:url];
+        });
+        return NO;
     }
-    
+
     // log out by clearing cookies
     if (urlString && [urlString caseInsensitiveCompare:@"file://gonative_logout"] == NSOrderedSame) {
         dispatch_async(dispatch_get_main_queue(), ^{
@@ -1813,6 +2021,8 @@ static NSInteger _currentWindows = 0;
 
 - (void)switchToWebView:(UIView*)newView showImmediately:(BOOL)showImmediately
 {
+    [self.eventsManager clearSubscriptions];
+
     UIView *oldView;
     if (self.wkWebview) {
         oldView = self.wkWebview;
@@ -1837,6 +2047,7 @@ static NSInteger _currentWindows = 0;
         self.wkWebview = (WKWebView*)newView;
         self.wkWebview.navigationDelegate = self;
         self.wkWebview.UIDelegate = self;
+        self.wkWebview.scrollView.delegate = self;
         scrollView = self.wkWebview.scrollView;
         
         // add KVO for single-page app url changes
@@ -1845,7 +2056,7 @@ static NSInteger _currentWindows = 0;
         [newView addObserver:self forKeyPath:@"canGoBack" options:0 context:nil];
         [newView addObserver:self forKeyPath:@"canGoForward" options:0 context:nil];
         
-        self.wkWebview.allowsBackForwardNavigationGestures = [GoNativeAppConfig sharedAppConfig].swipeGestures;
+        self.wkWebview.allowsBackForwardNavigationGestures = medianConfig().configRoot.navigation.swipeGestures;
         self.fileWriterSharer.webView = newView;
         [self addScriptMessageHandlersInWebView:self.wkWebview];
     } else {
@@ -1890,11 +2101,11 @@ static NSInteger _currentWindows = 0;
         [self showWebview];
     }
     
-    if ([GoNativeAppConfig sharedAppConfig].pullToRefresh) {
+    if (medianConfig().configRoot.navigation.iosPullToRefresh) {
         [self addPullToRefresh];
     }
-    
-    [((LEANAppDelegate *)[UIApplication sharedApplication].delegate).bridge switchToWebView:newView withRunner:self];
+
+    [((LEANAppDelegate *)[UIApplication sharedApplication].delegate).bridge switchToWebViewNewView:newView host:self];
 }
 
 // To detect single-page app navigation in WKWebView
@@ -1908,7 +2119,6 @@ static NSInteger _currentWindows = 0;
                 [self checkPreNavigationForUrl:url];
                 [self checkNavigationForUrl:url];
                 [self.actionManager didLoadUrl:url];
-                [self.registrationManager checkUrl:url];
             }
         }
         if ([keyPath isEqualToString:@"title"]) {
@@ -1930,6 +2140,9 @@ static NSInteger _currentWindows = 0;
 
 - (void)webView:(WKWebView *)webView didCommitNavigation:(WKNavigation *)navigation
 {
+    // main-frame document replaced, so the previous page's subscriptions no longer apply.
+    // Same-document navigations do not reach this delegate method.
+    [self.eventsManager clearSubscriptions];
     [self didStartLoad];
 }
 
@@ -1937,7 +2150,7 @@ static NSInteger _currentWindows = 0;
 {
     self.startedLoading = YES;
     dispatch_async(dispatch_get_main_queue(), ^{
-        if (![GoNativeAppConfig sharedAppConfig].pullToRefresh) {
+        if (!medianConfig().configRoot.navigation.iosPullToRefresh) {
             [self removePullRefresh];
         }
         
@@ -1956,23 +2169,25 @@ static NSInteger _currentWindows = 0;
         
         // stop watching location
         [self.locationManager stopUpdatingLocation];
+        
+        [self updateViewBackgroundColor];
     });
 }
 
 - (void)webView:(WKWebView *)webView didFinishNavigation:(WKNavigation *)navigation
 {
     [self didFinishLoad];
-    
-    [((LEANAppDelegate *)[UIApplication sharedApplication].delegate).bridge webView:webView didFinishNavigation:navigation withRunner:self];
+
+    [((LEANAppDelegate *)[UIApplication sharedApplication].delegate).bridge webViewDidFinishNavigationWebView:webView navigation:navigation host:self];
 }
 
 - (void)didFinishLoad
 {
     dispatch_async(dispatch_get_main_queue(), ^{
         [self showWebview];
-        
-        GoNativeAppConfig *appConfig = [GoNativeAppConfig sharedAppConfig];
-        
+
+        MCKMPMutableConfigState *appConfig = medianConfig();
+
         NSURL *url = nil;
         if (self.wkWebview) {
             url = self.wkWebview.URL;
@@ -1991,43 +2206,26 @@ static NSInteger _currentWindows = 0;
         [self setNavigationButtonStatus];
 
         [LEANUtilities overrideGeolocation:self.wkWebview];
-        self.logManager = [[GNLogManager alloc] initWithWebview:self.wkWebview enabled:appConfig.enableWebConsoleLogs];
-        
+        self.logManager = [[GNLogManager alloc] initWithWebview:self.wkWebview enabled:appConfig.configRoot.developmentTools.enableWebConsoleLogs];
+
         // update navigation title
-        if (appConfig.useWebpageTitle) {
+        if (appConfig.configRoot.navigation.useWebpageTitle) {
             if (self.wkWebview) {
                 self.nav.title = self.wkWebview.title;
             }
         }
-        
-        // update menu
-        if (appConfig.loginDetectionURL) {
-            [[LEANLoginManager sharedManager] checkLogin];
-            
-            self.visitedLoginOrSignup = [url matchesPathOf:appConfig.loginURL] ||
-            [url matchesPathOf:[GoNativeAppConfig sharedAppConfig].signupURL];
-        }
-        
+
+        // track login/signup page visits (forms intercept)
+        NSString *loginUrl = appConfig.configRoot.forms.loginConfig.interceptUrl;
+        NSString *signupUrl = appConfig.configRoot.forms.signupConfig.interceptUrl;
+        self.visitedLoginOrSignup = (loginUrl && [url matchesPathOf:[NSURL URLWithString:loginUrl]]) ||
+            (signupUrl && [url matchesPathOf:[NSURL URLWithString:signupUrl]]);
+
         // post-load javascript
-        if (appConfig.postLoadJavascript) {
-            [self runJavascript:appConfig.postLoadJavascript];
+        if (appConfig.configRoot.general.postLoadJavascript) {
+            [self runJavascript:appConfig.configRoot.general.postLoadJavascript];
         }
-        
-        // profile picker
-        if (self.profilePickerJs) {
-            dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.5 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-                if (self.wkWebview) {
-                    [self.wkWebview evaluateJavaScript:self.profilePickerJs completionHandler:^(id response, NSError *error) {
-                        if ([response isKindOfClass:[NSString class]]) {
-                            dispatch_async(dispatch_get_main_queue(), ^{
-                                [(LEANMenuViewController*)self.frostedViewController.menuViewController parseProfilePickerJSON:response];
-                            });
-                        }
-                    }];
-                }
-            });
-        }
-        
+
         // tabs
         [self checkNavigationForUrl: url];
         
@@ -2045,7 +2243,7 @@ static NSInteger _currentWindows = 0;
         [[NSNotificationCenter defaultCenter] postNotificationName:kLEANWebViewControllerUserFinishedLoading object:self];
         
         // document sharing
-        if (!appConfig.disableDocumentOpenWith &&
+        if (!appConfig.configRoot.navigation.iosDisableDocumentOpenWith &&
             [self.documentSharer isSharableRequest:self.currentRequest]) {
             if (!self.shareButton) {
                 self.shareButton = [[UIBarButtonItem alloc] initWithBarButtonSystemItem:UIBarButtonSystemItemAction target:self action:@selector(sharePressed:)];
@@ -2053,10 +2251,7 @@ static NSInteger _currentWindows = 0;
         } else {
             self.shareButton = nil;
         }
-                
-        // registration service
-        [self.registrationManager checkUrl:url];
-        
+
         BOOL doNativeBridge = YES;
         if (url) {
             doNativeBridge = [LEANUtilities checkNativeBridgeUrl:[url absoluteString]];
@@ -2069,7 +2264,7 @@ static NSInteger _currentWindows = 0;
         }
         
         // save session cookies as persistent
-        NSUInteger forceSessionCookieExpiry = [GoNativeAppConfig sharedAppConfig].forceSessionCookieExpiry;
+        NSUInteger forceSessionCookieExpiry = appConfig.configRoot.general.forceSessionCookieExpiry;
         if (forceSessionCookieExpiry > 0) {
             NSHTTPCookieStorage *cookieStore = [NSHTTPCookieStorage sharedHTTPCookieStorage];
             for (NSHTTPCookie *cookie in [cookieStore cookiesForURL:url]) {
@@ -2109,16 +2304,24 @@ static NSInteger _currentWindows = 0;
         
         // set initial css theme
         NSString *mode = [[NSUserDefaults standardUserDefaults] objectForKey:@"darkMode"];
-        [self setCssTheme:mode ?: appConfig.iosDarkMode andPersistData:NO];
+        [self setCssTheme:mode ?: appConfig.configRoot.styling.iosDarkMode andPersistData:NO];
         
-        // Accessibility & Dynamic Type Support
-        UIContentSizeCategory contentSizeCategory = [UIApplication sharedApplication].preferredContentSizeCategory;
-        [self applyCssForContentSizeCategory:contentSizeCategory];
-        
-        [LEANUtilities configureViewportOfWebView:self.wkWebview];
+        [self updateViewBackgroundColor];
         
         [self runJavascriptWithCallback:@[@"median_library_ready", @"gonative_library_ready"] data:nil];
     });
+}
+
+- (void)handleDeeplinkUrl:(NSURL *)url {
+    if (!url) {
+        return;
+    }
+    
+    if (self.didLoadPage || self.initialUrl != nil) {
+        [self loadUrl:url];
+    } else {
+        self.initialUrl = url;
+    }
 }
 
 -(void)runGonativeDeviceInfoWithCallback:(NSString*)callback {
@@ -2184,16 +2387,18 @@ static NSInteger _currentWindows = 0;
         }
     }
     
-    GoNativeAppConfig *appConfig = [GoNativeAppConfig sharedAppConfig];
-    
-    if (!appConfig.enableWindowOpen) {
+    MCKMPMutableConfigState *appConfig = medianConfig();
+
+    if (!appConfig.configRoot.general.enableWindowOpen) {
         dispatch_async(dispatch_get_main_queue(), ^{
             [self loadRequest:request];
         });
         return NO;
     }
-    
-    if (appConfig.maxWindowsAutoClose && _currentWindows == appConfig.maxWindows && [appConfig.initialURL matchesIgnoreAnchor:request.URL]) {
+
+    MCKMPMaxWindowsConfig *maxWindows = appConfig.maxWindows;
+    if (maxWindows.autoClose && _currentWindows == maxWindows.numWindows &&
+        [[NSURL URLWithString:appConfig.initialUrl] matchesIgnoreAnchor:request.URL]) {
         dispatch_async(dispatch_get_main_queue(), ^{
             LEANWebViewController *vc = self.navigationController.viewControllers.firstObject;
             [self loadRequest:request];
@@ -2258,7 +2463,7 @@ static NSInteger _currentWindows = 0;
         if (initialUrlPref) {
             [self loadUrl:[NSURL URLWithString:initialUrlPref]];
         } else {
-            [self loadUrl:[GoNativeAppConfig sharedAppConfig].initialURL];
+            [self loadUrl:[NSURL URLWithString:medianConfig().initialUrl]];
         }
     }
 }
@@ -2321,7 +2526,7 @@ static NSInteger _currentWindows = 0;
 {
     // if interactiveDelay is specified, then look for readyState=interactive, and show webview
     // with a delay. If not specified, wait for readyState=complete.
-    NSNumber *interactiveDelay = [GoNativeAppConfig sharedAppConfig].interactiveDelay;
+    NSNumber *interactiveDelay = medianConfig().configRoot.styling.transitionInteractiveDelayMax;
     
     void (^readyStateBlock)(id, NSError*) = ^(id status, NSError *error) {
         // we keep track of startedLoading because loading is only really finished when we have gone to
@@ -2357,9 +2562,9 @@ static NSInteger _currentWindows = 0;
 
 - (void)hideWebview
 {
-    [((LEANAppDelegate *)[UIApplication sharedApplication].delegate).bridge hideWebViewWithRunner:self];
-    
-    if ([GoNativeAppConfig sharedAppConfig].disableAnimations) return;
+    [((LEANAppDelegate *)[UIApplication sharedApplication].delegate).bridge hideWebViewWithRunnerHost:self];
+
+    if (medianConfig().configRoot.styling.disableAnimations) return;
     
     self.wkWebview.alpha = self.hideWebviewAlpha;
     self.wkWebview.userInteractionEnabled = NO;
@@ -2413,7 +2618,7 @@ static NSInteger _currentWindows = 0;
     }
     
     if ([[error domain] isEqualToString:NSURLErrorDomain]) {
-        if (![GoNativeAppConfig sharedAppConfig].iosShowOfflinePage)
+        if (!medianConfig().configRoot.navigation.iosShowOfflinePage.boolValue)
             return;
         
         if ([error code] == NSURLErrorCannotFindHost || [error code] == NSURLErrorNotConnectedToInternet ||
@@ -2431,7 +2636,7 @@ static NSInteger _currentWindows = 0;
 }
 
 - (void) showSidebarNavButton {
-    NSString *icon = [GoNativeAppConfig sharedAppConfig].sidebarMenuIcon ?: @"fas fa-bars";
+    NSString *icon = medianConfig().configRoot.navigation.sidebarNavigation.menuIcon ?: @"fas fa-bars";
     NSString *label = NSLocalizedString(@"button-menu", @"Button: Menu");
     self.navButton = [self.actionManager createNavBarButtonWithLabel:label icon:icon target:self action:@selector(showMenu)];
 }
@@ -2587,23 +2792,38 @@ static NSInteger _currentWindows = 0;
 
 #pragma mark - Scroll View Delegate
 
-- (void)scrollViewDidEndDragging:(UIScrollView *)scrollView willDecelerate:(BOOL)decelerate
-{
-    if (scrollView.contentOffset.y > 0) {
-        [self.navigationController setNavigationBarHidden:YES animated:YES];
-        [self.navigationController setToolbarHidden:YES animated:YES];
-        [scrollView setContentInset:UIEdgeInsetsMake(0, 0, 0, 0)];
-        
-    } else {
-        [self.navigationController setNavigationBarHidden:NO animated:YES];
-        [self.navigationController setToolbarHidden:NO animated:YES];
-        [scrollView setContentInset:UIEdgeInsetsMake(64, 0, 44, 0)];
+- (void)scrollViewDidScroll:(UIScrollView *)scrollView {
+    BOOL isScrollable = scrollView.contentSize.height > scrollView.bounds.size.height;
+    BOOL isScrolling = scrollView.isTracking && scrollView.isDragging && isScrollable;
+    
+    CGFloat currentScrollY = scrollView.contentOffset.y;
+    CGFloat previousScrollY = self.previousScrollY;
+    self.previousScrollY = currentScrollY;
+    
+    if (!isScrolling || CACurrentMediaTime() < self.nextScrollTime) {
+        return;
+    }
+    self.nextScrollTime = CACurrentMediaTime() + 0.3; // After running animation
+
+    MCKMPNavDefaultStyles *defaultStyles = medianConfig().navDefaultStyles;
+    BOOL showNavBar = currentScrollY <= 0 || currentScrollY <= previousScrollY;
+
+    if (self.isShowingTopNavBar && defaultStyles.topNavigationBar.styling.ios.hideOnScroll) {
+        [self.navigationController setNavigationBarHidden:!showNavBar animated:YES];
+    }
+
+    if (self.tabManager.isShowingTabBar && defaultStyles.bottomTabBar.styling.ios.hideOnScroll) {
+        if (showNavBar) {
+            [self showTabBarAnimated:YES];
+        } else {
+            [self hideTabBarAnimated:YES];
+        }
     }
 }
 
 - (BOOL)prefersStatusBarHidden
 {
-    return self.traitCollection.verticalSizeClass == UIUserInterfaceSizeClassCompact;
+    return self.isFullscreen || self.traitCollection.verticalSizeClass == UIUserInterfaceSizeClassCompact;
 }
 
 - (UIStatusBarStyle)preferredStatusBarStyle
@@ -2611,8 +2831,8 @@ static NSInteger _currentWindows = 0;
     if (self.statusBarStyle) {
         return [self.statusBarStyle integerValue];
     }
-    
-    if ([[GoNativeAppConfig sharedAppConfig].iosTheme isEqualToString:@"dark"]) {
+
+    if ([medianConfig().configRoot.styling.iosTheme isEqualToString:@"dark"]) {
         return UIStatusBarStyleLightContent;
     } else {
         return UIStatusBarStyleDefault;
@@ -2633,8 +2853,8 @@ static NSInteger _currentWindows = 0;
         [self.toolbar invalidateIntrinsicContentSize];
     } completion:^(id<UIViewControllerTransitionCoordinatorContext>  _Nonnull context) {
     }];
-    
-    [((LEANAppDelegate *)[UIApplication sharedApplication].delegate).bridge runner:self willTransitionToSize:size withTransitionCoordinator:coordinator];
+
+    [((LEANAppDelegate *)[UIApplication sharedApplication].delegate).bridge runnerWillTransitionToSizeHost:self width:size.width height:size.height coordinator:(NSObject*)coordinator];
 }
 
 - (void)viewWillLayoutSubviews
@@ -2680,38 +2900,28 @@ static NSInteger _currentWindows = 0;
     // fixes issue on iPhone XS Max and iPhone XR where instrinsic content height = 49
     [self.tabBar invalidateIntrinsicContentSize];
     [self.toolbar invalidateIntrinsicContentSize];
-    
-    
-    GoNativeAppConfig *appConfig = [GoNativeAppConfig sharedAppConfig];
-    
+
+    UIColor *backgroundColor = [UIColor whiteColor];
+
     // theme and colors
-    if ([appConfig.iosTheme isEqualToString:@"dark"]) {
-        self.view.backgroundColor = [UIColor blackColor];
-        self.webviewContainer.backgroundColor = [UIColor blackColor];
+    if ([medianConfig().configRoot.styling.iosTheme isEqualToString:@"dark"]) {
         self.tabBar.barStyle = UIBarStyleBlack;
         self.toolbar.barStyle = UIBarStyleBlack;
+        backgroundColor = [UIColor blackColor];
     } else {
         self.tabBar.barStyle = UIBarStyleDefault;
         self.toolbar.barStyle = UIBarStyleDefault;
-        
-        if (@available(iOS 12.0, *)) {
-            if (self.traitCollection.userInterfaceStyle == UIUserInterfaceStyleDark) {
-                self.view.backgroundColor = [UIColor blackColor];
-                self.webviewContainer.backgroundColor = [UIColor blackColor];
-            } else {
-                self.view.backgroundColor = [UIColor whiteColor];
-                self.webviewContainer.backgroundColor = [UIColor whiteColor];
-            }
-        } else {
-            self.view.backgroundColor = [UIColor whiteColor];
-            self.webviewContainer.backgroundColor = [UIColor whiteColor];
+        if (self.traitCollection.userInterfaceStyle == UIUserInterfaceStyleDark) {
+            backgroundColor = [UIColor blackColor];
         }
     }
     
-    [self applyStatusBarOverlay];
-    if (appConfig.iosEnableOverlayInStatusBar) {
-        [self updateStatusBarOverlay:appConfig.iosEnableOverlayInStatusBar];
+    if (![LEANUtilities isGlassDesignEnabled]) {
+        self.view.backgroundColor = backgroundColor;
+        self.webviewContainer.backgroundColor = backgroundColor;
     }
+    
+    [self applyStatusBarOverlay];
     
     self.tabBar.barTintColor = [UIColor colorNamed:@"tabBarTintColor"];
 }
@@ -2722,8 +2932,8 @@ static NSInteger _currentWindows = 0;
         if (mode == nil) {
             return;
         }
-        
-        if ([[GoNativeAppConfig sharedAppConfig].iosTheme isEqualToString:@"dark"]) {
+
+        if ([medianConfig().configRoot.styling.iosTheme isEqualToString:@"dark"]) {
             mode = @"dark";
         }
         
@@ -2744,8 +2954,8 @@ static NSInteger _currentWindows = 0;
     if (mode == nil) {
         return;
     }
-    
-    if ([[GoNativeAppConfig sharedAppConfig].iosTheme isEqualToString:@"dark"]) {
+
+    if ([medianConfig().configRoot.styling.iosTheme isEqualToString:@"dark"]) {
         mode = @"dark";
     }
 
@@ -2801,62 +3011,412 @@ static NSInteger _currentWindows = 0;
     [self setNeedsStatusBarAppearanceUpdate];
 }
 
-- (void)themeManagerHandleUrl:(NSURL *)url query:(NSDictionary *)query {
-    if ([url.path isEqualToString:@"/set"]) {
-        NSString *style = query[@"style"];
-        if (style) {
-            [self updateStatusBarStyle:style];
-        }
-        
-        NSString *color = query[@"color"];
-        BOOL isBlurEnabled = [query[@"blur"] boolValue];
-        if (color) {
-            [self updateStatusBarBackgroundColor:[LEANUtilities colorWithAlphaFromHexString:color] enableBlurEffect:isBlurEnabled];
-        }
-        
-        BOOL overlay = [query[@"overlay"] boolValue];
-        [self updateStatusBarOverlay:overlay];
-    }
-    else if ([url.path isEqualToString:@"/matchBodyBackgroundColor"]) {
-        BOOL enableMatching = [[query objectForKey:@"active"] boolValue];
-        [LEANUtilities matchStatusBarToBodyBackgroundColor:self.wkWebview enabled:enableMatching];
-        
-        // persist statusbar and body bg color matching status
-        [[NSUserDefaults standardUserDefaults] setBool:enableMatching forKey:@"matchStatusBarToBodyBgColor"];
-        [[NSUserDefaults standardUserDefaults] synchronize];
+- (void)updateViewBackgroundColor {
+    if ([LEANUtilities isGlassDesignEnabled] && MCKMPMutableConfig.shared.instance.configRoot.general.injectMedianJS) {
+        [LEANUtilities getBodyBackgroundColor:self.wkWebview completion:^(UIColor *color) {
+            self.view.backgroundColor = color;
+            self.webviewContainer.backgroundColor = color;
+        }];
     }
 }
 
-- (void)applyCssForContentSizeCategory:(NSString *)contentSizeCategory {
-    if (![GoNativeAppConfig sharedAppConfig].dynamicTypeEnabled) {
+#pragma mark - MCKMPIOSAppHost
+
+// WebView / VC -------------------------------------------------------------
+
+- (WKWebView *)getWebView {
+    return self.wkWebview;
+}
+
+- (void)runJavascriptScript:(NSString *)script {
+    [self runJavascript:script];
+}
+
+- (void)loadUrlUrl:(NSString *)url {
+    [self loadUrlString:url];
+}
+
+- (void)loadUrlUrl_:(NSURL *)url {
+    [self loadUrl:url];
+}
+
+- (UIViewController *)getViewController {
+    return self;
+}
+
+- (void)presentViewControllerViewController:(UIViewController *)viewController animated:(BOOL)animated {
+    [[self getTopPresentedViewController] presentViewController:viewController animated:animated completion:nil];
+}
+
+- (void)dismissViewControllerAnimated:(BOOL)animated {
+    [self dismissViewControllerAnimated:animated completion:nil];
+}
+
+// Navigation / tabs / sidebar ----------------------------------------------
+
+- (void)selectTabTabNumber:(int32_t)tabNumber {
+    [self.tabManager selectTabNumber:tabNumber];
+}
+
+- (void)deselectTabs {
+    [self.tabManager deselectTabs];
+}
+
+- (void)setTabsTabsJson:(NSString *)tabsJson {
+    id tabs = [NSJSONSerialization JSONObjectWithData:[tabsJson dataUsingEncoding:NSUTF8StringEncoding] options:0 error:nil];
+    if ([tabs isKindOfClass:[NSDictionary class]]) {
+        [self.tabManager setTabsWithJson:tabs];
+        self.tabManager.javascriptTabs = YES;
+    }
+}
+
+- (int32_t)getUrlLevel {
+    return (int32_t)self.urlLevel;
+}
+
+- (void)setUrlLevelUrlLevel:(int32_t)urlLevel {
+    self.urlLevel = urlLevel;
+}
+
+- (int32_t)urlLevelForUrlUrl:(NSString *)url {
+    return (int32_t)[LEANWebViewController urlLevelForUrl:[NSURL URLWithString:url]];
+}
+
+- (NSString *)titleForUrlUrl:(NSString *)url {
+    return [LEANWebViewController titleForUrl:[NSURL URLWithString:url]] ?: @"";
+}
+
+- (void)closeCurrentWindow {
+    if (self.navigationController.viewControllers.count > 1) {
+        dispatch_async(dispatch_get_main_queue(), ^{
+            [self.navigationController popViewControllerAnimated:YES];
+        });
+    }
+}
+
+- (void)openNewWindowUrl:(NSString *)url mode:(NSString *)mode {
+    [self.windowsManager openUrl:[NSURL URLWithString:url] mode:mode];
+}
+
+- (void)checkNavigationForPageUrl:(NSString *)url {
+    [self checkNavigationForUrl:[NSURL URLWithString:url]];
+}
+
+- (void)checkPreNavigationForPageUrl:(NSString *)url {
+    [self checkPreNavigationForUrl:[NSURL URLWithString:url]];
+}
+
+- (void)updateMenu {
+    dispatch_async(dispatch_get_main_queue(), ^{
+        [(LEANMenuViewController*)self.frostedViewController.menuViewController updateMenuWithStatus:@"default"];
+    });
+}
+
+- (void)setSidebarNavigationEnabledEnabled:(BOOL)enabled {
+    // nav2: median-core keeps the JS flag across pages and re-renders through applyNav2ForUrl:
+    if (medianConfig().isNativeNavigationV2) {
+        [medianConfig() setNavSidebarEnabledEnabled:enabled];
         return;
     }
-    
-    NSDictionary *fontScale = @{
-        UIContentSizeCategoryExtraSmall: @90,
-        UIContentSizeCategorySmall: @95,
-        UIContentSizeCategoryMedium: @100,
-        UIContentSizeCategoryLarge: @108,
-        UIContentSizeCategoryExtraLarge: @116,
-        UIContentSizeCategoryExtraExtraLarge: @124,
-        UIContentSizeCategoryExtraExtraExtraLarge: @132,
-        UIContentSizeCategoryAccessibilityMedium: @170,
-        UIContentSizeCategoryAccessibilityLarge: @190,
-        UIContentSizeCategoryAccessibilityExtraLarge: @210,
-        UIContentSizeCategoryAccessibilityExtraExtraLarge: @230,
-        UIContentSizeCategoryAccessibilityExtraExtraExtraLarge: @250,
-    };
-    
-    if (fontScale[contentSizeCategory]) {
-        NSString *createStyleJs = @" "
-        "   var style = document.createElement('style'); "
-        "   style.innerHTML = 'body { -webkit-text-size-adjust: %@%%; }'; "
-        "   document.head.appendChild(style); "
-        " ";
-        
-        NSString *javascript = [NSString stringWithFormat:createStyleJs, fontScale[contentSizeCategory]];
-        [self.wkWebview evaluateJavaScript:javascript completionHandler:nil];
+    [self setSidebarEnabled:enabled];
+}
+
+- (void)setSidebarItemsItemsJson:(NSString *)itemsJson enabled:(BOOL)enabled persist:(BOOL)persist {
+    [medianConfig() setSidebarMenusFromJsonItemsJson:itemsJson showNavigationMenu:enabled persist:persist];
+    if (medianConfig().isNativeNavigationV2) return;
+    dispatch_async(dispatch_get_main_queue(), ^{
+        [self setSidebarEnabled:enabled];
+        self.navigationItem.titleView = self.defaultTitleView;
+        [self updateNavigationBarItemsAnimated:NO];
+    });
+}
+
+// median.sidebar.getItems: replies {"default": [...]} with the sidebar for this page, as V1 did
+- (void)getSidebarItemsCallback:(NSString *)callback {
+    NSString *json = [medianConfig() sidebarMenusJsonForUrlUrl:self.wkWebview.URL.absoluteString ?: @""];
+    NSDictionary *menus = [NSJSONSerialization JSONObjectWithData:[json dataUsingEncoding:NSUTF8StringEncoding] options:0 error:nil];
+    if (![menus isKindOfClass:[NSDictionary class]]) return;
+    [self runJavascriptWithCallback:callback data:menus];
+}
+
+- (void)setNavigationLevelsData:(NSDictionary<NSString *,id> * _Nullable)data persist:(BOOL)persist {
+    [medianConfig() setNavigationLevelsRawData:data persist:persist];
+}
+
+- (void)setNavigationTitlesData:(NSDictionary<NSString *,id> * _Nullable)data persist:(BOOL)persist {
+    [medianConfig() setNavigationTitlesRawData:data persist:persist];
+}
+
+- (void)setMaxWindowsEnabled:(BOOL)enabled numWindows:(int32_t)numWindows autoClose:(BOOL)autoClose persist:(BOOL)persist {
+    [medianConfig() setMaxWindowsEnabled:enabled numWindows:numWindows autoClose:autoClose persist:persist];
+    [self updateWindowsController];
+}
+
+- (void)setWindowOpenHideNavbarHide:(BOOL)hide {
+    [LEANWebViewController setWindowOpenHideNavbar:hide];
+}
+
+- (void)setInternalExternalRulesRulesJson:(NSString *)rulesJson {
+    [medianConfig() setRegexRulesFromJsonRulesJson:rulesJson];
+}
+
+- (void)setInitialUrlUrl:(NSString *)url {
+    [self.configPreferences setInitialUrl:url];
+}
+
+// Appearance ----------------------------------------------------------------
+
+- (void)setCustomTitleTitle:(NSString *)title {
+    dispatch_async(dispatch_get_main_queue(), ^{
+        self.navigationItem.title = title.length > 0 ? title : medianConfig().configRoot.general.appName;
+        // hide titleView
+        self.defaultTitleView = nil;
+        self.navigationItem.titleView = nil;
+    });
+}
+
+- (void)toggleFullscreenFullscreen:(BOOL)fullscreen {
+    dispatch_async(dispatch_get_main_queue(), ^{
+        self.isFullscreen = fullscreen;
+        [self.navigationController setNavigationBarHidden:fullscreen animated:YES];
+        if (fullscreen) {
+            [self hideToolbarAnimated:YES];
+            [self hideTabBarAnimated:YES];
+        } else {
+            [self checkNavigationForUrl:self.wkWebview.URL]; // restore tab/toolbar per config
+        }
+        [self setNeedsStatusBarAppearanceUpdate];
+        [self adjustInsets];
+    });
+}
+
+- (void)setBrightnessBrightness:(float)brightness {
+    if (brightness < 0) {
+        // restore default
+        if (self.savedScreenBrightness >= 0) {
+            [UIScreen mainScreen].brightness = self.savedScreenBrightness;
+        }
+        self.restoreBrightnessOnNavigation = NO;
+        return;
     }
+    if (brightness > 1.0) return;
+    self.savedScreenBrightness = [UIScreen mainScreen].brightness;
+    [UIScreen mainScreen].brightness = brightness;
+}
+
+- (void)setRestoreBrightnessOnNavigationRestore:(BOOL)restore {
+    self.restoreBrightnessOnNavigation = restore;
+}
+
+- (void)setZoomScale:(double)scale {
+    [self.viewportManager setViewportWithScale:@(scale) width:nil webView:self.wkWebview];
+    [medianConfig() setWebviewZoomZoom:(float)scale];
+}
+
+- (double)getZoom {
+    NSNumber *zoom = medianConfig().webviewZoom;
+    return zoom ? zoom.doubleValue : 1.0;
+}
+
+- (void)setNativeThemeMode:(NSString *)mode {
+    [self setNativeTheme:mode];
+}
+
+- (void)setCssThemeMode:(NSString *)mode persist:(BOOL)persist {
+    [self setCssTheme:mode andPersistData:persist];
+}
+
+- (void)resetAppTheme {
+    NSString *defaultMode = medianConfig().configRoot.styling.iosDarkMode;
+    [self setNativeTheme:defaultMode];
+    [self setCssTheme:defaultMode andPersistData:YES];
+}
+
+- (void)updateStatusBarStyleStyle:(NSString *)style {
+    [self updateStatusBarStyle:style];
+}
+
+- (void)setStatusBarColorColor:(NSString *)color blur:(BOOL)blur {
+    [self updateStatusBarBackgroundColor:[LEANUtilities colorWithAlphaFromHexString:color] enableBlurEffect:blur];
+}
+
+- (void)updateStatusBarOverlayIsOverlayEnabled:(BOOL)isOverlayEnabled {
+    [self updateStatusBarOverlay:isOverlayEnabled];
+}
+
+- (void)matchStatusBarToBodyBackgroundColorEnabled:(BOOL)enabled {
+    [LEANUtilities matchStatusBarToBodyBackgroundColor:self.wkWebview enabled:enabled];
+    [[NSUserDefaults standardUserDefaults] setBool:enabled forKey:@"matchStatusBarToBodyBgColor"];
+    [[NSUserDefaults standardUserDefaults] synchronize];
+}
+
+- (void)setNavigationBarHiddenHidden:(BOOL)hidden animated:(BOOL)animated {
+    dispatch_async(dispatch_get_main_queue(), ^{
+        [self.navigationController setNavigationBarHidden:hidden animated:animated];
+    });
+}
+
+- (void)setToolbarHiddenHidden:(BOOL)hidden animated:(BOOL)animated {
+    dispatch_async(dispatch_get_main_queue(), ^{
+        if (hidden) {
+            [self hideToolbarAnimated:animated];
+        } else {
+            [self showToolbarAnimated:animated];
+        }
+    });
+}
+
+// Share / download -----------------------------------------------------------
+
+- (void)sharePageUrl:(NSString *)url text:(NSString *)text {
+    [self sharePageWithUrl:url.length > 0 ? url : nil text:text.length > 0 ? text : nil sender:nil];
+}
+
+- (void)downloadFileUrl:(NSString *)url filename:(NSString *)filename shouldSaveToGallery:(BOOL)shouldSaveToGallery open:(BOOL)open callback:(NSString *)callback {
+    NSURL *downloadUrl = [NSURL URLWithString:url relativeToURL:self.currentRequest.URL];
+    if (!downloadUrl) return;
+
+    if (shouldSaveToGallery) {
+        [self.documentSharer downloadImage:downloadUrl completion:^(NSDictionary *result) {
+            [self runJavascriptWithCallback:callback data:result];
+        }];
+        return;
+    }
+
+    if ([downloadUrl.scheme isEqualToString:@"blob"]) {
+        [self.fileWriterSharer downloadBlobUrl:downloadUrl filename:filename callback:callback];
+        return;
+    }
+
+    [self.documentSharer shareUrl:downloadUrl fromView:self.wkWebview filename:filename open:open completion:^(NSString *error) {
+        if (error) {
+            [self runJavascriptWithCallback:callback data:@{ @"success": @NO, @"error": error }];
+        } else {
+            [self runJavascriptWithCallback:callback data:@{ @"success": @YES }];
+        }
+    }];
+}
+
+// Device / connectivity / location / clipboard ------------------------------
+
+- (void)runGonativeDeviceInfoCallback:(NSString *)callback includeCarrierNames:(BOOL)includeCarrierNames {
+    [self runGonativeDeviceInfoWithCallback:callback];
+}
+
+- (NSDictionary<NSString *,id> *)getDeviceInfo {
+    MCKMPDeviceInfo *info = [[[MCKMPIOSDeviceInfoProvider alloc] initWithBundle:NSBundle.mainBundle] getDeviceInfo];
+    NSMutableDictionary *result = [[info toMap] mutableCopy];
+
+    LEANAppDelegate *appDelegate = (LEANAppDelegate*)[UIApplication sharedApplication].delegate;
+    if (appDelegate.apnsToken) result[@"apnsToken"] = appDelegate.apnsToken;
+    result[@"isFirstLaunch"] = @(appDelegate.isFirstLaunch);
+    NSString *publicKey = medianConfig().configRoot.general.publicKey;
+    result[@"publicKey"] = publicKey ?: @"";
+
+    return result;
+}
+
+- (void)sendConnectivityOnceCallback:(NSString *)callback {
+    [self runJavascriptWithCallback:callback data:[self getConnectivity]];
+}
+
+- (void)subscribeConnectivityCallback:(NSString *)callback {
+    [self runJavascriptWithCallback:callback data:[self getConnectivity]];
+    self.connectivityCallback = callback;
+}
+
+- (void)unsubscribeConnectivity {
+    self.connectivityCallback = nil;
+}
+
+- (void)promptLocationService {
+    [self requestLocation];
+}
+
+- (void)clipboardSetContent:(NSString *)content {
+    if (content && ![content isEqual:[NSNull null]]) {
+        [[UIPasteboard generalPasteboard] setString:content];
+    }
+}
+
+- (void)clipboardGetCallback:(NSString *)callback {
+    UIPasteboard *pasteboard = [UIPasteboard generalPasteboard];
+    NSDictionary *dict;
+    if (pasteboard && [pasteboard hasStrings]) {
+        dict = @{@"data": [pasteboard string]};
+    } else {
+        dict = @{@"error": @"Clipboard item is not a string."};
+    }
+    [self runJavascriptWithCallback:callback data:dict];
+}
+
+// Keyboard --------------------------------------------------------------------
+
+- (void)getKeyboardInfoCallback:(NSString *)callback {
+    [self runKeyboardInfoWithCallback:callback];
+}
+
+- (void)addKeyboardListenerCallback:(NSString *)callback {
+    self.keyboardListenerCallback = callback;
+}
+
+- (void)showKeyboardAccessoryViewVisible:(BOOL)visible {
+    [self.keyboardManager showKeyboardAccessoryView:visible];
+}
+
+// Events ----------------------------------------------------------------------
+
+- (void)invokeCallbackEventName:(NSString *)eventName data:(NSDictionary<NSString *,id> *)data {
+    [self triggerEvent:eventName data:data];
+}
+
+- (void)subscribeEventEventName:(NSString *)eventName {
+    [self.eventsManager subscribeEvent:eventName];
+}
+
+- (void)unsubscribeEventEventName:(NSString *)eventName {
+    [self.eventsManager unsubscribeEvent:eventName];
+}
+
+// Context menu / permissions ----------------------------------------------------
+
+- (void)setContextMenuEnabledEnabled:(BOOL)enabled {
+    [ContextMenuHandler setEnabled:enabled];
+}
+
+- (void)setContextMenuLinkActionsConfig:(NSDictionary<NSString *,id> *)config {
+    id actions = config[@"actions"];
+    if ([actions isKindOfClass:[NSArray class]]) {
+        [ContextMenuHandler setLinkActions:actions];
+    }
+}
+
+- (NSDictionary<NSString *,NSString *> *)checkPermissionStatusPermissions:(NSArray<NSString *> *)permissions {
+    return [MedianPermissionHandler getStatusWithKeys:permissions];
+}
+
+// Misc ----------------------------------------------------------------------------
+
+- (void)sendRegistrationData:(NSDictionary<NSString *,id> *)data {
+    // registration service dropped (legacy)
+}
+
+- (void)runCustomNativeBridgeParams:(NSDictionary<NSString *,NSString *> *)params {
+    [self runCustomCode:params];
+}
+
+- (void)handleContextualNavToolbarPath:(NSString *)path params:(NSDictionary<NSString *,id> *)params {
+    NSURL *url = [NSURL URLWithString:[@"median://ios" stringByAppendingString:path]];
+    if (url) [self.toolbarManager handleUrl:url query:params];
+}
+
+- (void)setWebConsoleLogsEnabledEnabled:(BOOL)enabled {
+    self.logManager = [[GNLogManager alloc] initWithWebview:self.wkWebview enabled:enabled];
+}
+
+- (void)getWebConsoleLogsCallback:(NSString *)callback {
+    // legacy GNLogManager only relayed /print; nothing buffered to return
+    [self runJavascriptWithCallback:callback data:@{@"logs": @[]}];
 }
 
 @end

@@ -9,7 +9,8 @@
 #import "LEANWebViewPool.h"
 #import "LEANWebViewController.h"
 #import "LEANUtilities.h"
-#import "LEANLoginManager.h"
+#import "LEANNotifications.h"
+@import MedianCoreKMP;
 
 @interface LEANWebViewPool () <WKNavigationDelegate>
 @property NSMutableDictionary *urlToWebview;
@@ -61,9 +62,6 @@
     // subscribe to dynamic config change notification
     [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(didReceiveNotification:) name:kLEANAppConfigNotificationProcessedWebViewPools object:nil];
     
-    // login status changing
-    [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(didReceiveNotification:) name:kLEANLoginManagerStatusChangedNotification object:nil];
-    
     [self processConfig];
 }
 
@@ -74,7 +72,8 @@
 
 - (void)processConfig
 {
-    NSArray *config = [GoNativeAppConfig sharedAppConfig].webviewPools;
+    NSData *poolsData = [[MCKMPMutableConfig.shared.instance.configRoot.performance webviewPoolsJson] dataUsingEncoding:NSUTF8StringEncoding];
+    NSArray *config = [NSJSONSerialization JSONObjectWithData:poolsData options:0 error:nil];
     if (![config isKindOfClass:[NSArray class]]) {
         return;
     }
@@ -143,8 +142,7 @@
     }
     else if ([[notification name] isEqualToString:kLEANAppConfigNotificationProcessedWebViewPools]) {
         [self processConfig];
-    } else if ([[notification name] isEqualToString:kLEANLoginManagerStatusChangedNotification] ||
-               [[notification name] isEqualToString:kLEANWebViewControllerClearPools]) {
+    } else if ([[notification name] isEqualToString:kLEANWebViewControllerClearPools]) {
         [self flushAll];
     }
 }
