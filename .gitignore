@@ -1,16 +1,7 @@
 build/
 *~
-xcuserdata
+## xcuserdata
 *.xccheckout
 .DS_Store
-Pods/
+## Pods/
 .idea
-
-# Tuist
-Derived/
-*.xcodeproj
-*.xcworkspace
-!*.xcworkspace/contents.xcworkspacedata
-.tuist-cache/
-graph.json
-Extensions/

@@ -1689,9 +1689,9 @@
     "iosTransparentNavBar": true,
     "androidHideTabBarOnScroll": false,
     "iosHideTabBarOnScroll": false,
-    "icon": "assets/defaults/app-icon-placeholder.png",
-    "iosIcon": "assets/defaults/app-icon-placeholder.png",
-    "androidIcon": "assets/defaults/app-icon-placeholder.png",
+    "icon": "https://s3.amazonaws.com/gonativeio/app_files/dnoknk/app_icon_ios.png",
+    "iosIcon": "https://s3.amazonaws.com/gonativeio/app_files/dnoknk/app_icon_ios.png",
+    "androidIcon": "https://s3.amazonaws.com/gonativeio/app_files/dnoknk/app_icon_ios.png",
     "initialZoom": null
   },
   "permissions": {
